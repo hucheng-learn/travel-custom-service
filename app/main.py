@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as stack:
         # 启动只准备资源，不连接数据库或调用中台；未配置时仍可探活。
         app.state.support_service = None
+        app.state.preview_user_id = settings.support_preview_user_id
         if settings.support_database_url:
             url = make_url(settings.support_database_url)
             if url.drivername != "mysql+asyncmy" or not url.database:
@@ -112,7 +113,7 @@ app.mount("/assets", StaticFiles(directory=ROOT / "fronted" / "assets"), name="f
 
 @app.get("/", response_class=FileResponse, include_in_schema=False)
 async def fronted_page() -> FileResponse:
-    # 调试页和接口同源，避免配置 CORS；页面不读取服务端的 .env。
+    # 客服页和接口同源，浏览器可携带平台登录凭据，页面不读取服务端的 .env。
     return FileResponse(
         ROOT / "fronted" / "index.html",
         headers={

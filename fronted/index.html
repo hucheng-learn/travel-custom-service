@@ -3,110 +3,155 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>旅游客服 · 对话调试台</title>
-  <link rel="stylesheet" href="/assets/styles.css">
-  <!-- 发送交互更新时使用新的脚本地址，让刷新页面的浏览器立即加载新版本。 -->
-  <script src="/assets/app.js?v=2" defer></script>
+  <meta name="theme-color" content="#f3f7f6">
+  <title>旅伴 · 在线客服</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=3">
+  <script src="/assets/app.js?v=3" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="mark" aria-hidden="true">旅</span><span>旅游客服 <small>对话调试台</small></span></div>
-    <div class="toplinks"><span class="badge">本机联调</span><a href="/docs">接口文档 ↗</a></div>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.8 8.2-2.1 5.5-5.5 2.1 2.1-5.5 5.5-2.1Z"/></symbol>
+    <symbol id="i-headset" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 1 1 16 0v4a4 4 0 0 1-4 4h-3"/><path d="M4 12h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H5a1 1 0 0 1-1-1v-4Zm16 0h-2a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h1a1 1 0 0 0 1-1v-4Z"/></symbol>
+    <symbol id="i-order" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 8.5h6m-6 4h6m-6 4h3"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M19 10c0 4.5-7 10-7 10s-7-5.5-7-10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+    <symbol id="i-plane" viewBox="0 0 24 24"><path d="M17.5 4.5c1-1 2.7-1.5 3.2-1 .5.5 0 2.2-1 3.2L16 10.4l2 7.7-1.8 1.8-3.6-6-3.3 3.3.1 2.4-1.4 1.4-1.8-3.5L2.8 16l1.4-1.4 2.4.1 3.3-3.3-6-3.6 1.8-1.8 7.7 2 4.1-3.5Z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 2.7 7.7 7 10 4.3-2.3 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m21 3-6.4 18-4.1-7.5L3 9.4 21 3Zm0 0-10.5 10.5"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-compass"/></svg></span>
+        <span class="brand-name">旅伴</span>
+        <span class="brand-section">旅行服务中心</span>
+      </div>
+      <button id="new-chat" class="new-chat" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>新对话
+      </button>
+    </div>
   </header>
+
   <main class="workspace">
-    <!-- 左侧选会话和验收话术，中间聊天，右侧看任务推进。 -->
-    <aside class="panel setup">
-      <h2>会话设置</h2>
-      <form id="session-form">
-        <label for="user-id">测试用户 ID</label>
-        <input id="user-id" inputmode="numeric" autocomplete="off" maxlength="19" placeholder="例如 1" required>
-        <label for="session-id">已有会话 ID <span class="subtle">可选</span></label>
-        <input id="session-id" autocomplete="off" maxlength="36" placeholder="继续旧会话时粘贴">
-        <div class="actions">
-          <button class="primary" type="submit">新建会话</button>
-          <button id="restore" type="button">加载旧会话</button>
-        </div>
-      </form>
-      <p class="helper">填中台已有的测试用户 ID，第一次发送时会自动创建或加载会话。</p>
-      <div class="divider"></div>
-      <h2>验收话术</h2>
-      <p class="helper">点击填入输入框，一次发送一条。</p>
-      <div class="samples">
-        <button type="button" data-prompt="帮我查订单">查订单</button>
-        <button type="button" data-prompt="帮我查行程">查订单行程</button>
-        <button type="button" data-prompt="下周一的出行">按日期查行程</button>
-        <button type="button" data-prompt="明天北京有哪些酒店">查酒店</button>
-        <button type="button" data-prompt="后天退房">补退房日期</button>
-        <button type="button" data-prompt="明天北京有哪些景点">查景点</button>
-        <button type="button" data-prompt="明天北京到上海的高铁">查高铁</button>
-        <button type="button" data-prompt="明天北京到上海的机票">查机票</button>
-        <button type="button" data-prompt="明天北京到天津的汽车票">查汽车票</button>
-        <button type="button" data-prompt="明天北京有哪些接机服务">查接机</button>
-        <button type="button" data-prompt="明天从北京到北京的接送多少钱">问接送报价</button>
-        <button type="button" data-prompt="退款审核通过就到账了吗">问退款规则</button>
-        <button type="button" data-prompt="退款多久到账">问到账时限</button>
-        <button type="button" data-prompt="这个政策是什么">试政策澄清</button>
-        <button type="button" data-prompt="申请退款">申请退款</button>
-        <button type="button" data-prompt="查退款进度">查退款进度</button>
-        <button type="button" data-prompt="提交工单">提交工单</button>
+    <aside class="service-sidebar" aria-labelledby="services-title">
+      <div class="travel-hero">
+        <p class="hero-title">旅途上的事，<br>随时问我</p>
       </div>
+
+      <!-- 快捷入口把常见需求填入输入框，旅客可以修改后再发送。 -->
+      <section class="services">
+        <h2 id="services-title">常用服务</h2>
+        <div class="service-list">
+          <details class="service">
+            <summary>
+              <span class="service-icon mint"><svg class="icon" aria-hidden="true"><use href="#i-order"/></svg></span>
+              <span class="service-copy"><strong>订单与支付</strong><small>订单状态、付款信息</small></span>
+              <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </summary>
+            <div class="service-prompts">
+              <button type="button" data-prompt="帮我查订单">查订单与支付状态</button>
+            </div>
+          </details>
+          <details class="service">
+            <summary>
+              <span class="service-icon sky"><svg class="icon" aria-hidden="true"><use href="#i-map"/></svg></span>
+              <span class="service-copy"><strong>我的行程</strong><small>出行安排、按日期查行程</small></span>
+              <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </summary>
+            <div class="service-prompts">
+              <button type="button" data-prompt="帮我查行程">查订单行程</button>
+              <button type="button" data-prompt="下周一的出行">按日期查行程</button>
+            </div>
+          </details>
+          <details class="service">
+            <summary>
+              <span class="service-icon sand"><svg class="icon" aria-hidden="true"><use href="#i-plane"/></svg></span>
+              <span class="service-copy"><strong>出行产品查询</strong><small>车票、机票、酒店、景点</small></span>
+              <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </summary>
+            <div class="service-prompts">
+              <button type="button" data-prompt="帮我查酒店">酒店</button>
+              <button type="button" data-prompt="帮我查景点">景点</button>
+              <button type="button" data-prompt="帮我查高铁">高铁</button>
+              <button type="button" data-prompt="帮我查机票">机票</button>
+              <button type="button" data-prompt="帮我查汽车票">汽车票</button>
+              <button type="button" data-prompt="帮我查接机服务">接机</button>
+            </div>
+          </details>
+          <details class="service">
+            <summary>
+              <span class="service-icon lilac"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span>
+              <span class="service-copy"><strong>退款与售后</strong><small>退款进度、提交客服工单</small></span>
+              <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </summary>
+            <div class="service-prompts">
+              <button type="button" data-prompt="申请退款">申请退款</button>
+              <button type="button" data-prompt="查退款进度">查退款进度</button>
+              <button type="button" data-prompt="提交工单">提交工单</button>
+            </div>
+          </details>
+        </div>
+      </section>
     </aside>
-    <section class="panel chat" aria-labelledby="chat-title">
+
+    <section class="chat" aria-labelledby="chat-title">
       <header class="chat-header">
-        <div><p class="eyebrow">会话工作区</p><h1 id="chat-title">旅游客服对话</h1></div>
-        <span class="session-chip" id="connection-label">未连接</span>
-      </header>
-      <div class="chat-body">
-        <div class="history-bar"><button id="older" type="button" hidden>加载更早的消息</button></div>
-        <div id="messages" class="messages" role="log" aria-label="对话记录" aria-live="polite">
-          <div class="empty"><span aria-hidden="true">旅</span><strong>开始一段对话</strong><p>在左侧填测试用户 ID，直接发送「帮我查订单」。</p></div>
+        <span class="assistant-mark"><svg class="icon" aria-hidden="true"><use href="#i-headset"/></svg></span>
+        <div>
+          <h1 id="chat-title">旅行助手</h1>
+          <p>智能客服</p>
         </div>
+      </header>
+
+      <div class="chat-body">
+        <div class="history-bar" id="history-bar" hidden>
+          <button id="older" class="quiet-button" type="button">查看更早的消息</button>
+        </div>
+        <div id="welcome" class="welcome">
+          <span class="welcome-mark"><svg class="icon" aria-hidden="true"><use href="#i-compass"/></svg></span>
+          <h2>你好，需要什么帮助？</h2>
+          <p>我可以帮你查订单和行程、咨询机票酒店，也可以协助处理退款和售后。</p>
+          <div class="suggestions" aria-label="常见问题">
+            <button type="button" data-prompt="帮我查订单">我的订单怎么样了？<svg class="icon" aria-hidden="true"><use href="#i-up-right"/></svg></button>
+            <button type="button" data-prompt="下周一的出行">下周一有什么出行安排？<svg class="icon" aria-hidden="true"><use href="#i-up-right"/></svg></button>
+            <button type="button" data-prompt="退款多久到账">退款多久到账？<svg class="icon" aria-hidden="true"><use href="#i-up-right"/></svg></button>
+          </div>
+        </div>
+        <div id="messages" class="messages" role="log" aria-label="对话记录" aria-live="polite" hidden></div>
       </div>
+
       <footer class="composer">
-        <div id="notice" class="notice" role="status" hidden></div>
-        <pre id="stream-preview" class="notice stream-preview" aria-live="off" hidden></pre>
-        <div id="error" class="error" role="alert" hidden></div>
+        <p id="notice" class="notice" role="status" hidden></p>
+        <div id="request-error" class="request-error" hidden>
+          <p id="error" role="alert"></p>
+          <button id="retry" type="button" hidden>重试</button>
+        </div>
         <form id="text-form">
           <label class="sr-only" for="message-text">消息内容</label>
-          <textarea id="message-text" maxlength="2000" rows="2" placeholder="输入一个查询，比如：明天北京有哪些酒店" required></textarea>
+          <textarea id="message-text" maxlength="2000" rows="2" placeholder="输入你想咨询的问题…" required></textarea>
           <div class="sendbar">
-            <span class="helper">Enter 发送 · Shift + Enter 换行</span>
-            <div class="actions">
-              <label class="stream-mode"><input id="stream-mode" type="checkbox"> SSE</label>
-              <button id="disconnect" type="button" hidden>断开流</button>
-              <button id="retry" type="button" hidden>重试上一条</button>
-              <button id="send" type="submit" class="primary">发送消息</button></div>
+            <span class="keyboard-hint">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</span>
+            <button id="send" class="primary send-button" type="submit">
+              <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>发送
+            </button>
           </div>
         </form>
       </footer>
     </section>
-    <aside class="panel diagnostics">
-      <div class="panel-heading"><h2>任务状态</h2><button id="refresh" type="button" disabled>刷新</button></div>
-      <p class="helper" id="version">尚未连接会话</p>
-      <div id="task-state" class="task-state"><p class="helper">连接后可查看活动和暂停任务。</p></div>
-      <div class="samples">
-        <button type="button" data-prompt="暂停所有任务">暂停所有</button>
-        <button type="button" data-prompt="继续上一个任务">继续上一个</button>
-        <button type="button" data-prompt="取消当前任务">取消当前</button>
-      </div>
-      <details class="snapshot"><summary>查看原始状态 JSON</summary><pre id="snapshot">—</pre></details>
-      <div class="divider"></div>
-      <h2>订单卡片</h2>
-      <form id="order-form">
-        <label for="order-id">本人订单的 ID</label>
-        <input id="order-id" inputmode="numeric" maxlength="19" autocomplete="off" placeholder="填 orderId，不是 orderNo" required>
-        <button id="send-order" type="submit">发送订单卡片</button>
-      </form>
-      <p class="helper">也可点击聊天记录中的「使用此订单」。</p>
-      <div class="divider"></div>
-      <h2>工单查询</h2>
-      <form id="ticket-form">
-        <label for="ticket-id">工单 ID</label>
-        <input id="ticket-id" inputmode="numeric" maxlength="19" placeholder="填工单卡片里的 ID" required>
-        <button type="submit">查工单</button>
-      </form>
-      <p class="helper" id="ticket-result" hidden></p>
-    </aside>
   </main>
+
+  <dialog id="new-chat-dialog" aria-labelledby="new-chat-title">
+    <form method="dialog">
+      <h2 id="new-chat-title">开始新对话？</h2>
+      <p>开始后将关闭当前对话。</p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" autofocus>返回</button>
+        <button type="submit" value="start" class="primary">开始新对话</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

@@ -65,8 +65,17 @@ class OrderMessage(IncomingMessage):
     object: Annotated[OrderCard | ConfirmationCard, Field(discriminator="type")]
 
 
-def get_user_id(value: Annotated[str | None, Header(alias="X-User-Id")] = None) -> int:
-    # 仅用于本机演示：对外部署必须由认证层提供身份，不能信任任意请求头。
+def get_user_id(request: Request, value: Annotated[str | None, Header(alias="X-User-Id")] = None) -> int:
+    # 本机预览只认环回直连。正式环境通过认证网关注入身份，浏览器无需提交用户 ID。
+    if value is None and (preview_user_id := getattr(request.app.state, "preview_user_id", None)) is not None:
+        local_hosts = {"127.0.0.1", "::1", "localhost"}
+        if (
+            request.client and request.client.host in local_hosts and request.url.hostname in local_hosts
+            and not any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers)
+            and request.headers.get("sec-fetch-site") in {None, "same-origin", "none"}
+        ):
+            return preview_user_id
+    # 现有联调客户端可显式传头。对外部署时应由网关替换客户端传入的同名头。
     if value is None or len(value) > 19 or not value.isascii() or not value.isdecimal():
         raise UnauthenticatedError
     user_id = int(value)

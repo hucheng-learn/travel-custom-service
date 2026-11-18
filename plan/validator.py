@@ -2,8 +2,10 @@ import re
 from dataclasses import dataclass
 from datetime import date, tzinfo
 
-from plan.fixed_order_plan import CALENDAR_DATE, CURRENT_ORDER_WORDS, explicit_control
-from plan.models import DATE_ITINERARY, PRODUCT, SLOT_FOR_FLOW, Command, FlowId, OrderReference, PlanRoute, SlotValue, TurnPlan
+from plan.fixed_order_plan import CALENDAR_DATE, CURRENT_ORDER_WORDS, explicit_control, is_stay_date_question
+from plan.models import (
+    DATE_ITINERARY, ITINERARY, PRODUCT, SLOT_FOR_FLOW, Command, FlowId, OrderReference, PlanRoute, SlotValue, TurnPlan,
+)
 from plan.product_models import DateRequest, ProductClues, ProductRequest
 from plan.travel_dates import business_zone, calendar_today, parse_date_text
 from plan.travel_plans import hotel_filters
@@ -108,7 +110,7 @@ class TurnPlanValidator:
             return self._merge_product(plan.product, text, previous if isinstance(previous, ProductRequest) else None)
         if plan.product or plan.date_text is not None:
             raise PlanRejectedError("这项查询需要订单号或订单卡片。")
-        return self._text_reference(plan, state, text)
+        return self._text_reference(plan, flow_id, state, text)
 
     def _parse_date(self, raw: str, text: str) -> date:
         if not raw or raw not in text:
@@ -163,9 +165,11 @@ class TurnPlanValidator:
         return active
 
     @staticmethod
-    def _text_reference(plan: TurnPlan, state: DialogueState, text: str) -> OrderReference | None:
+    def _text_reference(plan: TurnPlan, flow_id: FlowId, state: DialogueState, text: str) -> OrderReference | None:
         if plan.use_current_order:
-            if plan.order_number is not None or state.current_order_id is None or not CURRENT_ORDER_WORDS.search(text):
+            # 省略订单的入住日期追问只能引用已验证的行程订单，其他查询仍需明确指代。
+            refers_to_order = CURRENT_ORDER_WORDS.search(text) or (flow_id == ITINERARY and is_stay_date_question(text))
+            if plan.order_number is not None or state.current_order_id is None or not refers_to_order:
                 raise PlanRejectedError("还不能确定你指的是哪一笔订单，请发订单号或订单卡片。")
             return OrderReference(kind="order_id", value=str(state.current_order_id))
         number = plan.order_number

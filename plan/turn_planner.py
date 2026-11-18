@@ -7,8 +7,9 @@ from integration.llm import InvalidModelOutputError, LlmClient, ModelUnavailable
 from integration.regions import AreaCatalog
 from plan.fixed_order_plan import (
     ITINERARY_QUERY, ORDER_QUERY, explicit_control, explicit_order_itinerary, extract_order_number, fallback_plan,
+    is_stay_date_question,
 )
-from plan.models import DATE_ITINERARY, PRODUCT, TurnPlan
+from plan.models import DATE_ITINERARY, ITINERARY, PRODUCT, TurnPlan
 from plan.product_models import ProductRequest
 from plan.travel_plans import hotel_filters, stage_three_plan
 from task.flow.executor import DialogueState
@@ -45,6 +46,12 @@ class TurnPlanner:
     async def plan(self, text: str, state: DialogueState, *, waiting_for_order: bool) -> TurnPlan:
         if (control := explicit_control(text)) is not None:
             return control
+        if is_stay_date_question(text):
+            # 有已查到的订单就承接追问；缺订单时也先建立行程任务，让下一轮能接住订单号。
+            return TurnPlan(
+                route="task", command="start_flow", flow_id=ITINERARY,
+                use_current_order=state.current_order_id is not None and not waiting_for_order,
+            )
         stage_three = stage_three_plan(text, state, self._areas)
         if stage_three is not None:
             if stage_three.route == "knowledge" or stage_three.flow_id == DATE_ITINERARY or stage_three.command == "set_slots":

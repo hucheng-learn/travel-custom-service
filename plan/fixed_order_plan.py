@@ -10,6 +10,11 @@ ITINERARY_QUERY = re.compile(r"(?:查(?:询|看)?|看)(?:一下)?(?:我的)?(?:�
 ORDER_NUMBER = re.compile(r"(?:订单号\s*[:：]?\s*)?([A-Za-z0-9][A-Za-z0-9_-]{0,63})[。！!]?")
 CALENDAR_DATE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}")
 CURRENT_ORDER_WORDS = re.compile(r"这[笔个张份]|那[笔个张份]|刚才|上一笔|该订单|它")
+# 匹配独立的入住或退房日期追问，避免把酒店预订条件或通用规则当成订单行程。
+STAY_DATE_QUESTION = re.compile(
+    r"(?:具体)?(?:是)?(?:哪一天|哪天|什么时候)(?:入住|退房|离店)(?:的)?"
+    r"|(?:入住|退房|离店)(?:日期|时间)?(?:具体)?(?:是)?(?:哪一天|哪天|什么时候)"
+)
 CONTROL = re.compile(
     r"(?:请\s*|帮我\s*)?(取消|结束|停止|继续|恢复|接着|回到)\s*"
     r"(?:(?:这次|这个|当前|刚才|之前|上一个|上次|原来)的?)?\s*"
@@ -60,6 +65,10 @@ def extract_order_number(text: str) -> str | None:
     if match and not CALENDAR_DATE.fullmatch(match[1]):
         return match[1]
     return None
+
+
+def is_stay_date_question(text: str) -> bool:
+    return STAY_DATE_QUESTION.fullmatch(text.strip().rstrip("。！!？?").strip()) is not None
 
 
 def explicit_order_itinerary(text: str) -> TurnPlan | None:

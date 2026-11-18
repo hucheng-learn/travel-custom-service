@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # 探活不需要这两个地址；创建会话需要中台和客服库，数据库迁移只需要客服库。
     travel_api_base_url: str | None = None
     support_database_url: str | None = None
+    # 浏览器直连本机预览时由服务端指定测试身份，正式环境由登录层提供身份。
+    support_preview_user_id: int | None = Field(default=None, gt=0, lt=2**63)
     # 业务时区用于解释“今天”“下周一”等日期，不是数据库的存储时区。
     business_timezone: str = "Asia/Shanghai"
     travel_api_timeout_seconds: PositiveFloat = 5

@@ -4,81 +4,76 @@ const byId = (id) => document.getElementById(id);
 const messages = byId("messages");
 const scroller = messages.closest(".chat-body");
 const composer = byId("message-text");
-const sessionForm = byId("session-form");
 const textForm = byId("text-form");
-const flowNames = {
-  order_status_query: "订单与支付查询",
-  itinerary_query: "订单行程查询",
-  itinerary_date_query: "按日期查行程",
-  product_query: "商品咨询",
-  refund_request: "退款申请",
-  ticket_submit: "客服工单",
-};
-const routeNames = { task: "任务", clarify: "澄清", knowledge: "知识", chitchat: "闲聊" };
-const storageKey = "travel-demo-session";
+const newChatDialog = byId("new-chat-dialog");
+const storageKey = "travel-support-session";
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-
-let current = null;
-let busy = false;
-let olderCursor = null;
-let pending = null;
-let streamController = null;
+const ticketStatuses = { open: "待处理", in_progress: "处理中", resolved: "已解决", closed: "已关闭" };
+const refundStatuses = { pending: "待处理", approved: "审核通过", rejected: "审核驳回", success: "退款完成" };
 const rendered = new Set();
 
+let sessionId = null;
+let olderCursor = null;
+let confirmationId = null;
+let busy = false;
+let pending = null;
+let requestError = "";
+
 class ApiError extends Error {
-  constructor(message, retryable = false) {
-    super(message);
+  constructor(text, { code, retryable = false } = {}) {
+    super(text);
+    this.code = code;
     this.retryable = retryable;
   }
 }
 
 function responseError(data, status) {
   const error = data?.error;
-  const details = [error?.code, error?.traceId && "追踪号 " + error.traceId].filter(Boolean).join(" · ");
-  const message = error?.message || `服务未返回预期结果（HTTP ${status}）。`;
-  return new ApiError(details ? message + " " + details : message, error?.retryable || status >= 500 || status === 200);
+  const messages = {
+    UNAUTHENTICATED: "请从旅行平台登录后重新打开客服。",
+    SESSION_NOT_FOUND: "当前对话已失效，请开始新对话。",
+    TICKET_NOT_FOUND: "未找到该工单。",
+    TURN_IN_PROGRESS: "客服正在处理这条消息，请稍后重试。",
+  };
+  const code = error?.code ?? ([401, 403].includes(status) ? "UNAUTHENTICATED" : undefined);
+  const message = messages[code] || "客服暂时无法处理，请稍后再试。";
+  return new ApiError(message, { code, retryable: error?.retryable ?? (status >= 500 || status === 200) });
 }
 
-async function api(path, userId, { method = "GET", body } = {}) {
-  const headers = { "X-User-Id": userId };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+async function api(path, options = {}) {
   let response;
   try {
+    // 平台登录凭据随同源请求发送，账号身份由服务端获取。
     response = await fetch("/api/v1/support" + path, {
-      method, headers, signal: AbortSignal.timeout(35000),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      ...options, credentials: "same-origin", cache: "no-store",
+      signal: options.signal ?? AbortSignal.timeout(10000),
     });
   } catch {
-    throw new ApiError("没收到服务响应。若发送的是消息，可以重试上一条。", true);
+    throw new ApiError("暂时连不上客服，请稍后重试。", { retryable: true });
   }
+  if (response.ok && response.headers.get("Content-Type")?.startsWith("text/event-stream")) return response;
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data) {
-    throw responseError(data, response.status);
-  }
+  if (!response.ok || !data) throw responseError(data, response.status);
   return data;
 }
 
-async function readStream(path, userId, body) {
+async function readReply(path, body, preview) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 35000);
-  const parts = new Map();
   let reader;
-  streamController = controller;
-  syncControls();
   try {
-    const response = await fetch("/api/v1/support" + path + "/stream", {
+    const response = await api(path + "/stream", {
       method: "POST", signal: controller.signal, body: JSON.stringify(body),
-      headers: {"X-User-Id": userId, "Content-Type": "application/json", Accept: "text/event-stream"},
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     });
-    if (!response.ok) throw responseError(await response.json().catch(() => null), response.status);
     reader = response.body?.getReader();
-    if (!reader) throw new ApiError("浏览器未提供可读响应流。", true);
-    // 浏览器可能把一个中文字或一条事件切到不同网络块，用增量解码拼回完整内容。
+    // 一个中文字或一条事件可能被拆到多个网络块，收到完整事件后才读内容。
     const decoder = new TextDecoder();
+    const parts = new Map();
     let buffer = "";
-    while (true) {
+    while (reader) {
       const { value, done } = await reader.read();
-      if (done) throw new ApiError("响应流结束但没有收到最终结果；请重试上一条。", true);
+      if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let boundary;
       while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
@@ -86,163 +81,127 @@ async function readStream(path, userId, body) {
         buffer = buffer.slice(boundary.index + boundary[0].length);
         const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
         const content = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
-        if (!event || !content) continue; // 心跳注释不用展示。
+        if (!["delta", "done", "error"].includes(event) || !content) continue;
         const data = JSON.parse(content);
         if (event === "error") throw responseError(data, 0);
         if (event === "done") return data;
-        if (event === "delta") {
-          parts.set(data.messageIndex, (parts.get(data.messageIndex) || "") + data.text);
-          changeStatus("stream-preview", [...parts.values()].join("\n"));
-        }
+        parts.set(data.messageIndex, (parts.get(data.messageIndex) || "") + data.text);
+        const followReply = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 35;
+        preview.textContent = [...parts.values()].join("\n");
+        if (followReply) scrollToLatest();
       }
     }
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    const message = controller.signal.aborted ? "已断开响应流；可以重试上一条。" : "未能读取完整响应；请重试上一条。";
-    throw new ApiError(message, true);
   } finally {
     clearTimeout(timeout);
     if (reader) reader.cancel().catch(() => {});
-    streamController = null;
-    changeStatus("stream-preview", "");
-    syncControls();
   }
-}
-
-function changeStatus(id, text) {
-  const element = byId(id);
-  element.textContent = text;
-  element.hidden = !text;
-}
-
-function syncControls() {
-  for (const button of document.querySelectorAll("button")) button.disabled = busy;
-  for (const id of ["refresh", "retry", "older"]) byId(id).disabled = busy || !current;
-  byId("retry").hidden = !pending;
-  byId("older").hidden = olderCursor === null;
-  byId("disconnect").hidden = !streamController;
-  byId("disconnect").disabled = !streamController;
-  byId("stream-mode").disabled = busy;
-}
-
-async function run(label, operation) {
-  if (busy) return;
-  busy = true;
-  syncControls();
-  changeStatus("notice", label);
-  changeStatus("error", "");
-  try {
-    await operation();
-  } catch (error) {
-    changeStatus("error", error.message || "操作失败，请稍后重试。");
-  } finally {
-    busy = false;
-    changeStatus("notice", "");
-    syncControls();
-  }
+  throw new ApiError("客服回复暂未完整送达，请重试。", { retryable: true });
 }
 
 function makeElement(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
-  // 回复、订单名等都是数据，不用 innerHTML 拼接，以免误把文本当页面代码。
+  // 聊天内容和业务卡片都是外部数据，只作为文本插入页面。
   if (text !== undefined) element.textContent = text;
   return element;
 }
 
-function positiveId(text) {
-  return /^[0-9]{1,19}$/.test(text) && BigInt(text) > 0n && BigInt(text) < 9223372036854775808n;
+function showNotice(text) {
+  const notice = byId("notice");
+  notice.textContent = text;
+  notice.hidden = !text;
 }
 
-function readUserId() {
-  const field = byId("user-id");
-  const userId = field.value.trim();
-  if (!positiveId(userId)) {
-    field.focus();
-    throw new ApiError("请先在左侧填写有效的中台测试用户 ID，再发送消息。");
+function showError(text) {
+  byId("error").textContent = text;
+  byId("request-error").hidden = !text;
+}
+
+function syncControls() {
+  for (const button of document.querySelectorAll("[data-prompt], .message-card button, #new-chat, #older, #retry")) {
+    button.disabled = busy;
   }
-  return userId;
-}
-
-function sessionPath(session) {
-  return "/sessions/" + encodeURIComponent(session.sessionId);
-}
-
-function showTask(snapshot) {
-  const panel = byId("task-state");
-  panel.replaceChildren();
-  byId("version").textContent = `状态版本 ${snapshot.version}`;
-  byId("snapshot").textContent = JSON.stringify(snapshot, null, 2);
-  const active = snapshot.activeTask;
-  if (active) {
-    panel.append(makeElement("strong", "", flowNames[active.flowId] || active.flowId));
-    panel.append(makeElement("p", "", "当前步骤：" + active.stepId));
-    if (active.pendingConfirmationId) panel.append(makeElement("p", "", "等待确认提交"));
-    if (active.missingSlots?.length) panel.append(makeElement("p", "", "待补：" + active.missingSlots.join("、")));
-  } else {
-    panel.append(makeElement("p", "", "当前无活动任务"));
+  for (const actions of messages.querySelectorAll("[data-confirmation]")) {
+    const isActive = actions.dataset.confirmation === confirmationId;
+    actions.hidden = !isActive;
+    for (const button of actions.querySelectorAll("button")) button.disabled = busy || !isActive;
   }
-  if (snapshot.pausedTasks?.length) {
-    panel.append(makeElement("p", "", "暂停任务"));
-    const list = makeElement("ul");
-    for (const task of snapshot.pausedTasks) {
-      list.append(makeElement("li", "", `${flowNames[task.flowId] || task.flowId} · ${task.stepId}`));
-    }
-    panel.append(list);
+  byId("send").disabled = busy || !composer.value.trim();
+  byId("retry").hidden = !pending || !requestError;
+  byId("history-bar").hidden = olderCursor === null;
+  byId("welcome").hidden = messages.childElementCount > 0;
+  messages.hidden = !byId("welcome").hidden;
+}
+
+async function run(operation, label = "") {
+  if (busy) return;
+  busy = true;
+  syncControls();
+  showError("");
+  showNotice(label);
+  try {
+    await operation();
+  } catch (error) {
+    showError(error instanceof ApiError ? error.message : "操作暂未完成，请稍后再试。");
+  } finally {
+    busy = false;
+    showNotice("");
+    // 读取工单或历史后，仍可重试未送达的消息。
+    if (requestError && byId("request-error").hidden) showError(requestError);
+    syncControls();
   }
 }
 
-function orderCard(object) {
-  const card = makeElement("div", "order-card");
-  const attrs = object.attributes || {};
-  card.append(makeElement("strong", "", object.title || "订单卡片"));
-  card.append(makeElement("p", "", [attrs.orderNo && "订单号 " + attrs.orderNo, "订单 ID " + object.id].filter(Boolean).join(" · ")));
-  if (attrs.paidAmount != null) card.append(makeElement("p", "", `实付 ${attrs.paidAmount} ${attrs.currencyCode || ""}`));
-  if (object.type === "order" && positiveId(String(object.id))) {
-    const button = makeElement("button", "", "使用此订单");
-    button.type = "button";
-    button.addEventListener("click", () => queueMessage({ type: "object", object: { type: "order", id: String(object.id) } }));
-    card.append(button);
-  }
-  return card;
+function actionButton(label, onClick, className = "") {
+  const button = makeElement("button", className, label);
+  button.type = "button";
+  button.addEventListener("click", onClick);
+  return button;
 }
 
-function salesCard(object) {
-  const card = makeElement("div", "order-card");
-  const attrs = object.attributes || {};
-  card.append(makeElement("strong", "", object.title || object.type));
+function renderCard(object) {
+  const { type, id, title, attributes: attrs = {} } = object;
+  const card = makeElement("div", "message-card");
+  const actions = makeElement("div", "card-actions");
+  const titles = { order: "订单", confirmation: "确认提交", ticket: "客服工单", refund_request: "退款申请" };
+  card.append(makeElement("strong", "", title || titles[type] || "服务信息"));
   if (attrs.summary) card.append(makeElement("p", "", attrs.summary));
-  if (attrs.status) card.append(makeElement("p", "", "状态：" + attrs.status));
-  if (attrs.amount) card.append(makeElement("p", "", "申请金额：" + attrs.amount));
-  if (object.type === "confirmation" && uuidPattern.test(object.id)) {
-    const buttons = makeElement("div", "actions");
-    for (const [decision, label] of [["confirm", "确认提交"], ["reject", "不提交"]]) {
-      const button = makeElement("button", decision === "confirm" ? "primary" : "", label);
-      button.type = "button";
-      button.addEventListener("click", () => queueMessage({type: "object", object: {type: "confirmation", id: object.id, decision}}));
-      buttons.append(button);
+
+  if (type === "order") {
+    if (attrs.paidAmount != null) {
+      card.append(makeElement("p", "", `实付 ${attrs.paidAmount} ${attrs.currencyCode || ""}`.trim()));
     }
-    card.append(buttons);
-  } else if (object.type === "ticket" && positiveId(String(object.id))) {
-    card.append(makeElement("p", "", "工单 ID：" + object.id));
-    const button = makeElement("button", "", "查工单");
-    button.type = "button";
-    button.addEventListener("click", () => queryTicket(String(object.id)));
-    card.append(button);
-  } else if (object.type === "refund_request" && positiveId(String(object.id))) {
-    const button = makeElement("button", "", "查退款进度");
-    button.type = "button";
-    button.addEventListener("click", () => queueMessage({type: "text", text: "查退款进度 " + object.id}));
-    card.append(button);
+    actions.append(actionButton("使用此订单", () => queueMessage({ type: "object", object: { type, id: String(id) } })));
+  } else if (type === "confirmation") {
+    actions.dataset.confirmation = id;
+    for (const [decision, label] of [["confirm", "确认提交"], ["reject", "不提交"]]) {
+      actions.append(actionButton(label, () => queueMessage({ type: "object", object: { type, id, decision } }),
+        decision === "confirm" ? "primary" : ""));
+    }
+  } else if (type === "ticket") {
+    const progress = makeElement("p", "", ticketStatuses[attrs.status] || "");
+    progress.setAttribute("role", "status");
+    card.append(progress);
+    actions.append(actionButton("查看处理进度", () => run(async () => {
+      const info = await api("/tickets/" + encodeURIComponent(id));
+      progress.textContent = [ticketStatuses[info.status], info.nextStep].filter(Boolean).join("\n");
+    }, "正在查询工单…")));
+  } else if (type === "refund_request") {
+    const details = [refundStatuses[attrs.status], attrs.amount != null ? "申请金额 " + attrs.amount : ""];
+    card.append(makeElement("p", "", details.filter(Boolean).join(" · ")));
+    actions.append(actionButton("查看退款进度", () => queueMessage({ type: "text", text: "查退款进度 " + id })));
   }
+  if (actions.childElementCount) card.append(actions);
   return card;
 }
 
 function renderUserMessage(input) {
   const entry = makeElement("article", "turn");
-  const sent = input.type === "text" ? input.text : (input.object.type === "confirmation"
-    ? (input.object.decision === "confirm" ? "确认提交" : "不提交") : "已发订单卡片 · " + input.object.id);
-  entry.append(makeElement("p", "bubble user", sent));
+  const text = input.type === "text" ? input.text : (input.object.type === "confirmation"
+    ? (input.object.decision === "confirm" ? "确认提交" : "不提交") : "已选择订单");
+  entry.append(makeElement("p", "bubble user", text));
   return entry;
 }
 
@@ -250,60 +209,58 @@ function renderTurn(turn, entry) {
   if (rendered.has(turn.messageId)) return null;
   rendered.add(turn.messageId);
   entry ??= renderUserMessage(turn.input);
-  entry.append(makeElement("p", "turn-label", `客服 · ${routeNames[turn.route] || turn.route}`));
+  entry.append(makeElement("p", "turn-label", "旅行助手"));
   for (const item of turn.messages) {
     if (item.type === "text") entry.append(makeElement("p", "bubble assistant", item.text));
-    if (item.type === "object") entry.append(item.object.type === "order" ? orderCard(item.object) : salesCard(item.object));
+    if (item.type === "object") entry.append(renderCard(item.object));
   }
   return entry;
 }
 
-function showHistory(history, { prepend = false } = {}) {
+function scrollToLatest() {
+  scroller.scrollTop = scroller.scrollHeight;
+}
+
+function sessionPath() {
+  return "/sessions/" + encodeURIComponent(sessionId);
+}
+
+function rememberSession(id) {
+  sessionId = id;
+  // 本标签页只保存会话标识，刷新时重新向服务端请求历史并校验归属。
+  try {
+    if (id) sessionStorage.setItem(storageKey, id);
+    else sessionStorage.removeItem(storageKey);
+  } catch { /* 禁用浏览器存储时仍可继续当前对话。 */ }
+}
+
+function showHistory(history, prepend = false) {
   const oldHeight = scroller.scrollHeight;
   const oldTop = scroller.scrollTop;
   if (!prepend) {
     rendered.clear();
     messages.replaceChildren();
   }
-  const fragment = document.createDocumentFragment();
-  for (const turn of history.list) {
-    const entry = renderTurn(turn);
-    if (entry) fragment.append(entry);
-  }
-  if (prepend) messages.prepend(fragment);
-  else messages.append(fragment);
-  if (!rendered.size) messages.append(makeElement("p", "empty", "会话已就绪，发一条消息开始测试。"));
+  const entries = history.list.map((turn) => renderTurn(turn)).filter(Boolean);
+  messages.prepend(...entries);
   olderCursor = history.nextBeforeSeq ?? null;
-  scroller.scrollTop = prepend ? oldTop + scroller.scrollHeight - oldHeight : scroller.scrollHeight;
+  syncControls();
+  if (prepend) scroller.scrollTop = oldTop + scroller.scrollHeight - oldHeight;
+  else scrollToLatest();
 }
 
-async function connect(session) {
-  const path = sessionPath(session);
-  const [snapshot, history] = await Promise.all([
-    api(path + "/state", session.userId),
-    api(path + "/messages", session.userId),
-  ]);
-  if (!current || current.userId !== session.userId || current.sessionId !== session.sessionId) pending = null;
-  current = session;
-  byId("user-id").value = session.userId;
-  byId("session-id").value = session.sessionId;
-  byId("connection-label").textContent = "用户 " + session.userId;
-  showTask(snapshot);
-  showHistory(history);
-  changeStatus("ticket-result", "");
-  // 刷新同一个标签页能恢复会话；浏览器不缓存消息内容或服务端密钥。
-  try { sessionStorage.setItem(storageKey, JSON.stringify(current)); } catch { /* 不影响本次使用 */ }
-}
-
-async function createSession(userId) {
-  const response = await api("/sessions", userId, { method: "POST" });
-  byId("session-id").value = response.sessionId;
-  await connect({ userId, sessionId: response.sessionId });
+async function readConfirmation() {
+  try {
+    const snapshot = await api(sessionPath() + "/state");
+    confirmationId = snapshot.activeTask?.pendingConfirmationId ?? null;
+  } catch {
+    // 状态暂不可用时仍展示回复，确认入口等服务端返回有效的确认 ID 再显示。
+  }
 }
 
 function newMessageId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  // 普通 HTTP 的内网 IP 有时不提供 randomUUID；仍用浏览器随机数生成标准 UUID。
+  // 内网 HTTP 可能不提供 randomUUID，仍使用浏览器随机数生成请求标识。
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 15) | 64;
   bytes[8] = (bytes[8] & 63) | 128;
@@ -312,130 +269,122 @@ function newMessageId() {
 }
 
 function queueMessage(input) {
-  return run("", async () => {
-    if (!current) {
-      // 第一次发送可以直接建会话；填过旧会话 ID 时先加载，不另建会话。
-      const userId = readUserId();
-      const sessionId = byId("session-id").value.trim();
-      if (sessionId) {
-        if (!uuidPattern.test(sessionId)) throw new ApiError("请填写完整的会话 ID，或清空后新建。");
-        await connect({ userId, sessionId });
-      } else {
-        await createSession(userId);
-      }
-    }
-    pending = { session: current, body: { ...input, messageId: newMessageId() } };
-    await deliver(pending);
-  });
+  if (busy) return;
+  // 按回车重发相同内容时也复用消息 ID，防止一次确认变成两次写操作。
+  const key = JSON.stringify(input);
+  if (pending?.key !== key) pending = { key, body: { ...input, messageId: newMessageId() } };
+  sendPending();
 }
 
 function sendPending() {
-  if (pending) return run("", () => deliver(pending, "正在重试上一条…"));
+  if (pending) run(() => deliver(pending.body));
 }
 
-async function deliver({ session, body }, notice = "客服正在处理…") {
-  const path = sessionPath(session);
-  const empty = messages.querySelector(".empty");
-  // 用户消息先显示，收到回复后补在同一轮下方。若刷新已载入这轮，重试时复用已有记录。
-  const entry = rendered.has(body.messageId) ? null : renderUserMessage(body);
-  if (entry) {
-    empty?.remove();
-    messages.append(entry);
-    scroller.scrollTop = scroller.scrollHeight;
-  }
-  const draft = body.type === "text" && composer.value.trim() === body.text ? composer.value : null;
-  if (draft !== null) composer.value = "";
+async function deliver(body) {
+  const entry = renderUserMessage(body);
+  const preview = makeElement("p", "bubble assistant", "旅行助手正在处理…");
+  preview.setAttribute("aria-live", "off");
+  entry.append(preview);
+  messages.append(entry);
+  syncControls();
+  scrollToLatest();
 
+  requestError = "";
+  if (body.type === "text" && composer.value.trim() === body.text) composer.value = "";
   let reply;
   try {
-    const request = byId("stream-mode").checked
-      ? readStream(path + "/messages", session.userId, body)
-      : api(path + "/messages", session.userId, { method: "POST", body });
-    changeStatus("notice", notice);
-    reply = await request;
+    if (!sessionId) {
+      const session = await api("/sessions", { method: "POST" });
+      rememberSession(session.sessionId);
+    }
+    reply = await readReply(sessionPath() + "/messages", body, preview);
   } catch (error) {
-    // 请求失败时撤下临时气泡，原正文仍可恢复，重试继续使用同一个 messageId。
-    entry?.remove();
-    if (empty) messages.append(empty);
-    if (draft !== null && composer.value === "") composer.value = draft;
-    if (!error.retryable) pending = null;
+    entry.remove();
+    if (body.type === "text" && !composer.value) composer.value = body.text;
+    if (error.retryable) requestError = error.message;
+    else pending = null;
     throw error;
-  } finally {
-    changeStatus("notice", "");
   }
+
+  // 只在服务端确认轮次完成后展示业务卡片，避免流中断时给出未落库的操作。
   pending = null;
+  preview.remove();
+  const previousConfirmation = confirmationId;
+  confirmationId = reply.messages.find((item) => item.object?.type === "confirmation")?.object.id ?? null;
   renderTurn({ ...reply, input: body }, entry);
-  scroller.scrollTop = scroller.scrollHeight;
-  if (body.type === "object" && body.object.type === "order" && byId("order-id").value.trim() === body.object.id) {
-    byId("order-id").value = "";
-  }
-  try {
-    showTask(await api(path + "/state", session.userId));
-  } catch (error) {
-    throw new ApiError("消息已收到，任务状态刷新失败：" + error.message);
-  }
+  scrollToLatest();
+  // 没有新确认卡时，只有上一轮还有待确认事项才需要查它是否有效。
+  if (previousConfirmation && !confirmationId) await readConfirmation();
 }
 
-sessionForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  run("正在新建会话…", () => createSession(readUserId()));
-});
-byId("restore").addEventListener("click", () => run("正在加载会话…", async () => {
-  const sessionId = byId("session-id").value.trim();
-  if (!uuidPattern.test(sessionId)) throw new ApiError("请填写完整的会话 ID。");
-  await connect({ userId: readUserId(), sessionId });
-}));
-byId("refresh").addEventListener("click", () => run("正在刷新记录和任务状态…", () => connect(current)));
-byId("older").addEventListener("click", () => run("正在读取更早的记录…", async () => {
-  const history = await api(sessionPath(current) + "/messages?beforeSeq=" + olderCursor, current.userId);
-  showHistory(history, { prepend: true });
-}));
-byId("retry").addEventListener("click", sendPending);
-byId("disconnect").addEventListener("click", () => streamController?.abort());
-function queryTicket(id) {
-  return run("正在查询工单…", async () => {
-    if (!current) throw new ApiError("请先创建或加载会话。");
-    if (!positiveId(id)) throw new ApiError("请填写有效工单 ID。");
-    const ticket = await api("/tickets/" + encodeURIComponent(id), current.userId);
-    byId("ticket-id").value = id;
-    changeStatus("ticket-result", `${ticket.ticketNo} · ${ticket.status} · ${ticket.nextStep}`);
-  });
+function startNewChat() {
+  rememberSession(null);
+  confirmationId = null;
+  pending = null;
+  requestError = "";
+  composer.value = "";
+  showError("");
+  showHistory({ list: [] });
+  composer.focus();
 }
-byId("ticket-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  queryTicket(byId("ticket-id").value.trim());
+
+byId("new-chat").addEventListener("click", () => {
+  if (!sessionId && !pending && !composer.value.trim()) {
+    composer.focus();
+    return;
+  }
+  newChatDialog.returnValue = "cancel";
+  newChatDialog.showModal();
 });
+newChatDialog.addEventListener("close", () => {
+  if (newChatDialog.returnValue === "start") startNewChat();
+});
+byId("retry").addEventListener("click", sendPending);
+byId("older").addEventListener("click", () => run(async () => {
+  const history = await api(sessionPath() + "/messages?beforeSeq=" + olderCursor);
+  showHistory(history, true);
+}, "正在读取历史消息…"));
 textForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = composer.value.trim();
   if (text) queueMessage({ type: "text", text });
 });
+composer.addEventListener("input", syncControls);
 composer.addEventListener("keydown", (event) => {
-  // 中文输入法确认候选词也可能按回车，不能在那时把半句发出去。
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229 && !busy) {
+  // 中文输入法确认候选词时也可能按回车，等确认结束后再发送。
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
-    textForm.requestSubmit();
+    if (!busy && composer.value.trim()) textForm.requestSubmit();
   }
-});
-byId("order-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const id = byId("order-id").value.trim();
-  if (!positiveId(id)) return changeStatus("error", "请填写有效的订单 ID（orderId）。");
-  queueMessage({ type: "object", object: { type: "order", id } });
 });
 for (const button of document.querySelectorAll("[data-prompt]")) {
   button.addEventListener("click", () => {
     composer.value = button.dataset.prompt;
+    button.closest("details")?.removeAttribute("open");
+    syncControls();
     composer.focus();
   });
 }
 
+async function restoreConversation() {
+  let saved;
+  try { saved = sessionStorage.getItem(storageKey); } catch { return; }
+  if (!uuidPattern.test(saved || "")) return;
+  sessionId = saved;
+  await run(async () => {
+    try {
+      const history = await api(sessionPath() + "/messages");
+      showHistory(history);
+      await readConfirmation();
+    } catch (error) {
+      if (error.code === "SESSION_NOT_FOUND") {
+        rememberSession(null);
+        return;
+      }
+      throw error;
+    }
+  }, "正在恢复上次对话…");
+}
+
 syncControls();
-try {
-  const saved = JSON.parse(sessionStorage.getItem(storageKey));
-  if (saved && positiveId(saved.userId) && uuidPattern.test(saved.sessionId)) {
-    byId("user-id").value = saved.userId;
-    byId("session-id").value = saved.sessionId;
-    run("正在恢复上次会话…", () => connect(saved));
-  }
-} catch { /* 本地会话记录损坏时可以手动重新加载。 */ }
+restoreConversation();
