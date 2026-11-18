@@ -238,13 +238,18 @@ function salesCard(object) {
   return card;
 }
 
-function renderTurn(turn) {
+function renderUserMessage(input) {
+  const entry = makeElement("article", "turn");
+  const sent = input.type === "text" ? input.text : (input.object.type === "confirmation"
+    ? (input.object.decision === "confirm" ? "确认提交" : "不提交") : "已发订单卡片 · " + input.object.id);
+  entry.append(makeElement("p", "bubble user", sent));
+  return entry;
+}
+
+function renderTurn(turn, entry) {
   if (rendered.has(turn.messageId)) return null;
   rendered.add(turn.messageId);
-  const entry = makeElement("article", "turn");
-  const sent = turn.input.type === "text" ? turn.input.text : (turn.input.object.type === "confirmation"
-    ? (turn.input.object.decision === "confirm" ? "确认提交" : "不提交") : "已发订单卡片 · " + turn.input.object.id);
-  entry.append(makeElement("p", "bubble user", sent));
+  entry ??= renderUserMessage(turn.input);
   entry.append(makeElement("p", "turn-label", `客服 · ${routeNames[turn.route] || turn.route}`));
   for (const item of turn.messages) {
     if (item.type === "text") entry.append(makeElement("p", "bubble assistant", item.text));
@@ -307,7 +312,7 @@ function newMessageId() {
 }
 
 function queueMessage(input) {
-  return run("客服正在处理…", async () => {
+  return run("", async () => {
     if (!current) {
       // 第一次发送可以直接建会话；填过旧会话 ID 时先加载，不另建会话。
       const userId = readUserId();
@@ -325,30 +330,42 @@ function queueMessage(input) {
 }
 
 function sendPending() {
-  if (pending) return run("正在重试上一条…", () => deliver(pending));
+  if (pending) return run("", () => deliver(pending, "正在重试上一条…"));
 }
 
-async function deliver({ session, body }) {
+async function deliver({ session, body }, notice = "客服正在处理…") {
   const path = sessionPath(session);
-  let reply;
-  try {
-    // 网络出错保留原正文和 messageId；“重试”不会新建一轮。
-    reply = byId("stream-mode").checked
-      ? await readStream(path + "/messages", session.userId, body)
-      : await api(path + "/messages", session.userId, { method: "POST", body });
-  } catch (error) {
-    if (!error.retryable) pending = null;
-    throw error;
-  }
-  pending = null;
-  const userInput = body.type === "text" ? { type: "text", text: body.text } : { type: "object", object: body.object };
-  const entry = renderTurn({ ...reply, input: userInput });
+  const empty = messages.querySelector(".empty");
+  // 用户消息先显示，收到回复后补在同一轮下方。若刷新已载入这轮，重试时复用已有记录。
+  const entry = rendered.has(body.messageId) ? null : renderUserMessage(body);
   if (entry) {
-    messages.querySelector(".empty")?.remove();
+    empty?.remove();
     messages.append(entry);
     scroller.scrollTop = scroller.scrollHeight;
   }
-  if (body.type === "text" && composer.value.trim() === body.text) composer.value = "";
+  const draft = body.type === "text" && composer.value.trim() === body.text ? composer.value : null;
+  if (draft !== null) composer.value = "";
+
+  let reply;
+  try {
+    const request = byId("stream-mode").checked
+      ? readStream(path + "/messages", session.userId, body)
+      : api(path + "/messages", session.userId, { method: "POST", body });
+    changeStatus("notice", notice);
+    reply = await request;
+  } catch (error) {
+    // 请求失败时撤下临时气泡，原正文仍可恢复，重试继续使用同一个 messageId。
+    entry?.remove();
+    if (empty) messages.append(empty);
+    if (draft !== null && composer.value === "") composer.value = draft;
+    if (!error.retryable) pending = null;
+    throw error;
+  } finally {
+    changeStatus("notice", "");
+  }
+  pending = null;
+  renderTurn({ ...reply, input: body }, entry);
+  scroller.scrollTop = scroller.scrollHeight;
   if (body.type === "object" && body.object.type === "order" && byId("order-id").value.trim() === body.object.id) {
     byId("order-id").value = "";
   }

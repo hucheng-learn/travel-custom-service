@@ -112,7 +112,7 @@ class AfterSales:
         except TravelHTTPError as error:
             if error.status_code == 401:
                 raise
-            message = "没有找到本人的订单或明细。" if error.status_code in {403, 404} else "中台暂不可用，请稍后再试。"
+            message = "没有找到本人的订单或明细。" if error.status_code in {403, 404} else "暂时无法办理售后，请稍后再试。"
             return FlowResult(task, [text_reply(message)])
         except (TravelClientError, TimeoutError, ValueError):
             return FlowResult(task, [text_reply("暂未核实售后结果。请稍后重试；如果刚提交了退款，请先查退款进度。")])
@@ -129,7 +129,7 @@ class AfterSales:
 
     async def status(self, user_id: int, claim: ReservedTurn, search: str) -> list[dict]:
         if self._refunds is None or self._travel is None:
-            return [text_reply("中台暂不可用。")]
+            return [text_reply("暂时无法查询退款进度，请稍后再试。")]
         try:
             async with asyncio.timeout(12):
                 if not search:
@@ -190,7 +190,7 @@ class AfterSales:
                         return self._ask(task, "item", "可选明细：\n" + "\n".join(choices))
                     else:
                         draft.order_id = None
-                        return self._ask(task, "order", "中台没有返回可选订单明细。")
+                        return self._ask(task, "order", "没有查到可申请退款的订单项目。")
             else:
                 return self._ask(task, step)
         elif step == "item":
@@ -246,7 +246,12 @@ class AfterSales:
             draft.order_no = None
             draft.no_order = False
             task.step_id = "order"
-            return await self._collect(user_id, task, "", obj) if obj else self._ask(task, "order")
+            if obj:
+                return await self._collect(user_id, task, "", obj)
+            if task.flow_id == REFUND:
+                # 换单后要重新核对明细和金额，提示用户哪些退款资料可以继续使用。
+                return self._ask(task, "order", "已清除原订单、明细和金额，原确认卡已失效。已保留退款方式和原因。")
+            return self._ask(task, "order")
         for prefix, field in (("修改金额", "amount"), ("修改原因", "reason"), ("修改描述", "description")):
             if text.startswith(prefix) and field in REQUIRED[task.flow_id]:
                 draft.confirmation = None
@@ -267,7 +272,7 @@ class AfterSales:
         task.missing_slots = []
         if task.flow_id == REFUND:
             if self._refunds is None:
-                raise SalesInputError("中台未配置，暂不能核对退款。")
+                raise SalesInputError("暂时无法核对退款信息，请稍后再试。")
             item, remaining, _ = await self._refunds.preflight(user_id, draft.order_id, draft.item_id)
             amount = remaining if draft.refund_type == "full" else money(draft.amount)
             if not 0 < amount <= remaining:
@@ -307,7 +312,8 @@ class AfterSales:
             return FlowResult(None, [text_reply("已取消本次提交，没有新建申请或工单。")])
         if task.flow_id == REFUND:
             if not self._refund_write_enabled or self._refunds is None:
-                return FlowResult(task, [text_reply("真实退款提交未启用。本轮没有向中台发出写请求。")])
+                # 提交功能关闭时，明确告知这次没有产生退款申请。
+                return FlowResult(task, [text_reply("当前无法在这里提交退款申请。这次申请未提交。")])
             try:
                 operation = await self._refunds.submit(claim, user_id, task.task_id, card.id, card.target)
             except SalesInputError as error:

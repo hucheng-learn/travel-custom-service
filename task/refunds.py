@@ -89,7 +89,7 @@ class Refunds:
             raise SalesInputError("这条明细不存在或当前状态不支持申请退款。")
         previous, complete = requests
         if not complete:
-            raise SalesInputError("未能完整核对已有申请，未提交退款。请从中台售后页核对。")
+            raise SalesInputError("暂时无法核对已有退款记录，这次申请未提交。请先到订单页查看退款进度。")
         selected = [row for row in previous if _positive_id(row.get("orderItemId")) == item_id]
         if any(row.get("statusCode") in {"pending", "approved"} for row in selected):
             raise SalesInputError("这条明细已有进行中的退款申请，不能重复提交。")
@@ -129,7 +129,7 @@ class Refunds:
         except TravelHTTPError as error:
             if error.status_code in {400, 401, 403, 404, 422}:
                 return await self._operations.complete_refund(
-                    row.id, "rejected", {"note": "中台拒绝了本次申请，未确认创建。请核对订单条件。"}
+                    row.id, "rejected", {"note": "退款申请未能提交，请核对订单是否符合退款条件。"}
                 )
             return await self._mark_unknown(user_id, row.id)
         except (TravelClientError, ValueError):

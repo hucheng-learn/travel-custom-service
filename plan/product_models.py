@@ -10,6 +10,7 @@ PRODUCT_NAMES = {
     "hotel": "酒店", "scenic": "景点", "flight": "机票",
     "train": "火车票", "bus": "汽车票", "transfer": "接送",
 }
+HOTEL_TYPE_NAMES = {"luxury": "豪华型", "business": "商务型", "resort": "度假型", "boutique": "精品型"}
 
 
 class ProductClues(BaseModel):
@@ -35,6 +36,8 @@ class ProductRequest(BaseModel):
     business_date: date | None = None
     end_date: date | None = None
     keyword: str | None = None
+    hotel_star_rating: Literal["3", "4", "5"] | None = None
+    hotel_type: Literal["luxury", "business", "resort", "boutique"] | None = None
     detail: bool = False
     quote: bool = False
 

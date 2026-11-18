@@ -1,21 +1,29 @@
 import asyncio
+import re
 from dataclasses import dataclass
 
 from integration.regions import Area, AreaCatalog
 from integration.travel_client import TravelClient, TravelClientError, TravelHTTPError
-from plan.product_models import PRODUCT_NAMES, TRANSPORT_KINDS, ProductRequest
+from plan.product_models import HOTEL_TYPE_NAMES, PRODUCT_NAMES, TRANSPORT_KINDS, ProductRequest
 from task.action.order_status import ActionResult, _amount, _currency, _positive_id, display_business_time, read_items
 
 
 ACTION_NAME = "search_public_products"
 OUTCOMES = frozenset({"ok", "not_found", "unavailable", "need_selection"})
 PAGE_SIZE = 20
+SCENIC_CITY_PAGE_SIZE = 100
 LOOKUP_SECONDS = 12
 NAME_FIELDS = {
     "hotel": ("hotelName", "hotelId"), "scenic": ("scenicName", "scenicSpotId"),
     "flight": ("flightNo", "departureId"), "train": ("trainNo", "departureId"),
     "bus": ("routeName", "departureId"), "transfer": ("serviceName", "serviceId"),
 }
+# 将已知的酒店设施代码显示为旅客熟悉的名称，其它设施沿用原名称。
+HOTEL_FACILITY_NAMES = {
+    "wifi": "无线网络", "parking": "停车场", "breakfast": "早餐", "gym": "健身房",
+    "pool": "游泳池", "bar": "酒吧", "courtyard": "庭院", "tea_room": "茶室",
+}
+CABIN_NAMES = {"economy": "经济舱", "premium_economy": "高端经济舱", "business": "商务舱", "first": "头等舱"}
 
 
 @dataclass(frozen=True)
@@ -45,7 +53,7 @@ def check_product(request: ProductRequest, catalog: AreaCatalog) -> ProductCheck
             return ProductCheck(field, f"没能识别{label}，请发完整的省市区名称。")
         if len(candidates) > 1:
             displayed = "、".join(area.label for area in candidates[:4])
-            return ProductCheck(field, f"这个地名有多个候选：{displayed}。请发完整的{label}。")
+            return ProductCheck(field, f"这个地名有多个候选：{displayed}。请回复其中一个完整地名。")
         selections[field] = candidates[0]
     if request.business_date is None:
         label = "入住" if kind == "hotel" else "出行"
@@ -67,8 +75,9 @@ def _money(row: dict, *keys: str, fallback_currency: str | None = None) -> str |
     for key in keys:
         amount = _amount(row.get(key))
         if amount is not None and currency:
-            suffix = " 起" if key == "minSalePriceAmount" else ""
-            return f"{amount} {currency}{suffix}"
+            suffix = "起" if key == "minSalePriceAmount" else ""
+            unit = "元" if currency == "CNY" else currency
+            return f"{amount} {unit}{suffix}"
     return None
 
 
@@ -96,11 +105,23 @@ class ProductAction:
         if travel is None or result.areas is None or kind is None or day is None:
             return ActionResult("unavailable")
         areas = result.areas
+        scenic_district = None
         params: dict[str, str | int] = {"pageNo": 1, "pageSize": PAGE_SIZE}
         if kind == "hotel" and request.end_date:
             params.update(areaId=areas["area"].id, checkInDate=day.isoformat(), checkOutDate=request.end_date.isoformat())
+            # 中台按星级、类型分别查库存，keyword 仍只匹配酒店名称。
+            if request.hotel_star_rating:
+                params["starRatingCodes"] = request.hotel_star_rating
+            if request.hotel_type:
+                params["hotelTypeCodes"] = request.hotel_type
         elif kind == "scenic":
-            params.update(areaId=areas["area"].id, travelDate=day.isoformat())
+            area = areas["area"]
+            city = self._catalog.city_for(area)
+            params.update(areaId=city.id, travelDate=day.isoformat())
+            if city != area:
+                # 景点接口以城市为单位，保留用户选中的区县，用返回的地址确认所属区县。
+                scenic_district = area
+                params["pageSize"] = SCENIC_CITY_PAGE_SIZE
         elif kind in TRANSPORT_KINDS:
             params.update(departureAreaId=areas["origin"].id, arrivalAreaId=areas["destination"].id,
                           departureDate=day.isoformat())
@@ -120,15 +141,23 @@ class ProductAction:
             params[filter_key] = request.keyword
         try:
             async with asyncio.timeout(LOOKUP_SECONDS):
-                data = await travel.search_products(kind, params)
-                rows = read_items(data, "list")
-                total = data.get("total")
+                if scenic_district is not None:
+                    rows = await self._scenic_in_district(travel, params, scenic_district)
+                    total = len(rows)
+                else:
+                    data = await travel.search_products(kind, params)
+                    rows = read_items(data, "list")
+                    total = data.get("total")
                 name_field, _ = NAME_FIELDS[kind]
                 if request.keyword and kind in {"flight", "transfer"}:
                     rows = [row for row in rows if request.keyword.casefold() in (_text(row.get(name_field)) or "").casefold()]
                 if not rows:
-                    if type(total) is int and total > PAGE_SIZE:
+                    if scenic_district is None and type(total) is int and total > PAGE_SIZE:
                         return ActionResult("need_selection", _reply("当前只查了第一页，暂没找到指定商品。可补充其它条件再查。"))
+                    if kind == "scenic" and (scenic_district is not None or not request.keyword):
+                        return ActionResult("not_found", _reply(
+                            f"没有查到 {day.isoformat()} 在{areas['area'].label}可订的景点。可以换日期或地区再查。"
+                        ))
                     return ActionResult("not_found")
                 # 对具体房型、舱位或报价，先锁定唯一商品，不能拿列表第一项代替用户选择。
                 show_detail = request.detail or (kind == "transfer" and request.quote) or bool(request.keyword)
@@ -137,11 +166,17 @@ class ProductAction:
                 header = f"{day.isoformat()} 的{PRODUCT_NAMES[kind]}结果："
                 if kind == "hotel":
                     header = f"{day.isoformat()} 入住、{request.end_date.isoformat()} 退房的酒店结果："
+                elif scenic_district is not None:
+                    header = f"{day.isoformat()} 在{scenic_district.label}可订的景点："
                 lines = [header, *(self._summarize(kind, row) for row in rows[:5])]
                 if (type(total) is int and total > len(rows[:5])) or len(rows) > 5:
                     lines.append("这里只展示本次查询的部分结果。")
                 if show_detail:
                     lines.append("有多个候选，请回复具体商品名称或班次编号。")
+                    return ActionResult("need_selection", _reply("\n".join(lines)))
+                if kind == "hotel" and (request.hotel_star_rating or request.hotel_type):
+                    # 等旅客选酒店，再沿用这次的入住和退房日期查询房型。
+                    lines.append("回复酒店名称即可查看房型和首晚价格。")
                     return ActionResult("need_selection", _reply("\n".join(lines)))
                 return ActionResult("ok", _reply("\n".join(lines)))
         except TravelHTTPError as error:
@@ -151,16 +186,39 @@ class ProductAction:
         except (TravelClientError, TimeoutError, ValueError):
             return ActionResult("unavailable")
 
-    def _summarize(self, kind: str, row: dict) -> str:
+    @staticmethod
+    async def _scenic_in_district(travel: TravelClient, params: dict[str, str | int], district: Area) -> list[dict]:
+        matches = []
+        page_no = 1
+        while True:
+            data = await travel.search_products("scenic", {**params, "pageNo": page_no})
+            rows = read_items(data, "list")
+            total = data.get("total")
+            if type(total) is not int or total < 0 or (not rows and total > (page_no - 1) * SCENIC_CITY_PAGE_SIZE):
+                raise ValueError("中台景点分页结果不完整")
+            matches.extend(row for row in rows if district.matches_district_address(_text(row.get("address")) or ""))
+            # 区县候选可能在城市列表的后续页。找到第六条后已能展示前五条并提示还有结果。
+            if len(matches) > 5 or page_no * SCENIC_CITY_PAGE_SIZE >= total:
+                return matches
+            page_no += 1
+
+    def _summarize(self, kind: str, row: dict, *, include_inventory: bool = True) -> str:
         name = _text(row.get(NAME_FIELDS[kind][0])) or PRODUCT_NAMES[kind]
         pieces = [f"- {name}"]
+        if kind == "hotel":
+            if (star := _text(row.get("starRatingCode"))) in {"3", "4", "5"}:
+                pieces.append(f"{star} 星")
+            if label := HOTEL_TYPE_NAMES.get(_text(row.get("hotelTypeCode"))):
+                pieces.append(label)
         for label, field in (("出发", "departureTime"), ("到达", "arrivalTime")):
             if value := display_business_time(row.get(field), self._timezone):
                 pieces.append(f"{label} {value}")
+        if not include_inventory:
+            return "，".join(pieces)
         if price := _money(row, "minSalePriceAmount", "salePriceAmount"):
             pieces.append(price)
         if (stock := _stock(row)) is not None:
-            pieces.append(f"可用量 {stock}")
+            pieces.append(f"可订 {stock} 间" if kind == "hotel" else f"可用量 {stock}")
         for field in ("availableCabinClasses", "availableSeatClasses"):
             available = row.get(field)
             if isinstance(available, list):
@@ -169,7 +227,7 @@ class ProductAction:
                     pieces.append("可选舱位或席别：" + "、".join(labels))
         if kind == "transfer" and type(row.get("passengerCapacity")) is int:
             pieces.append(f"可载 {row['passengerCapacity']} 人")
-        return "；".join(pieces)
+        return "，".join(pieces)
 
     async def _detail(self, travel: TravelClient, request: ProductRequest, areas: dict[str, Area], row: dict) -> ActionResult:
         kind, day = request.kind, request.business_date
@@ -177,19 +235,33 @@ class ProductAction:
             return ActionResult("unavailable")
         product_id = _positive_id(row.get(NAME_FIELDS[kind][1]))
         detail = await travel.get_product(kind, product_id)
-        lines = [f"{day.isoformat()} 的中台结果：", self._summarize(kind, row)]
+        header = f"{day.isoformat()} 的{PRODUCT_NAMES[kind]}详情"
+        if kind == "hotel" and request.end_date:
+            # 首晚价取决于入住日，可订房量也与住宿日期有关，因此显示用户查的完整日期。
+            header = f"{day.isoformat()} 入住，{request.end_date.isoformat()} 退房"
+        # 航班详情按各舱位的实时库存展示价格，避免把列表起价当成可购买价格。
+        lines = [header, self._summarize(kind, row, include_inventory=kind != "flight")]
         for label, field in (("地址", "address"), ("开放", "openTime"), ("关闭", "closeTime"),
                              ("办理入住", "checkInTime"), ("办理退房", "checkOutTime"), ("车型", "vehicleTypeCode")):
             if value := _text(detail.get(field)):
+                if field in {"openTime", "closeTime"} and re.fullmatch(r"[0-9]{1,2}:[0-9]{2}:00", value):
+                    value = value[:-3].zfill(5)
                 lines.append(f"{label}：{value}")
         if kind == "hotel" and request.end_date:
             data = await travel.get_hotel_room_types(product_id, day.isoformat(), request.end_date.isoformat())
-            if tags := detail.get("facilityTags"):
-                if isinstance(tags, list):
-                    lines.append("设施：" + "、".join(value for tag in tags[:8] if (value := _text(tag))))
+            tags = detail.get("facilityTags")
+            if isinstance(tags, list):
+                facilities = [HOTEL_FACILITY_NAMES.get(value.casefold(), value)
+                              for tag in tags[:8] if (value := _text(tag))]
+                if facilities:
+                    lines.append("设施：" + "、".join(facilities))
             items = read_items(data, "list")
             name_field, price_field = "roomTypeName", "firstNightSalePriceAmount"
         elif kind == "scenic":
+            # 从景点详情展示实际评级和简介，缺少信息时跳过。
+            for label, field in (("景区等级", "ratingCode"), ("景点简介", "summary")):
+                if value := _text(detail.get(field)):
+                    lines.append(f"{label}：{value}")
             data = await travel.get_scenic_ticket_types(product_id, day.isoformat())
             items = read_items(data, "list")
             name_field, price_field = "ticketTypeName", "salePriceAmount"
@@ -201,37 +273,44 @@ class ProductAction:
             if request.quote:
                 quote = await travel.get_transfer_price(product_id, areas["origin"].id, areas["destination"].id, day.isoformat())
                 if price := _money(quote, "salePriceAmount"):
-                    lines.append(f"中台报价：{price}")
+                    lines.append(f"接送费用：{price}")
                 else:
-                    lines.append("中台没有返回这段接送路线的价格。")
+                    lines.append("暂未查到这段接送的价格。")
                 if (stock := _stock(quote)) is not None:
                     lines.append(f"可用量：{stock}")
             return ActionResult("ok", _reply("\n".join(lines)))
 
         for entry in items[:5]:
-            label = _text(entry.get(name_field)) or "库存项"
-            price = _money(entry, price_field, fallback_currency=_currency(row.get("currencyCode")))
+            label = _text(entry.get(name_field)) or ("房型" if kind == "hotel" else "可选项目")
             stock = _stock(entry)
+            if kind == "flight":
+                label = CABIN_NAMES.get(label, label)
+                if stock == 0:
+                    lines.append(f"{label}，不可售")
+                    continue
+            price = _money(entry, price_field, fallback_currency=_currency(row.get("currencyCode")))
             pieces = [label]
             if price:
                 pieces.append(f"首晚 {price}" if kind == "hotel" else price)
-            if stock is not None:
-                pieces.append(f"可用量 {stock}")
-            lines.append("；".join(pieces))
+            if kind == "flight" and stock is not None:
+                pieces.append(f"余 {stock} 张")
+            elif stock is not None:
+                pieces.append(f"可订 {stock} 间" if kind == "hotel" else f"可用量 {stock}")
+            lines.append("，".join(pieces))
         if not items:
-            lines.append("中台未返回该日期的明细库存。")
+            lines.append("暂未查到这段日期的房型信息。" if kind == "hotel" else "暂未查到当天的可选项目。")
         if request.detail:
             self._add_booking_rules(detail, lines)
         return ActionResult("ok", _reply("\n".join(lines)))
 
     @staticmethod
     def _add_booking_rules(detail: dict, lines: list[str]) -> None:
-        # 只翻译已知字段；中台没给退改条件时，不从通用 FAQ 推断具体商品的规则。
+        # 只展示商品明确提供的预订条件，避免从取消时间推断是否免费。
         rule = detail.get("bookingRule")
         if not isinstance(rule, dict):
             return
-        for label, field in (("最晚预订", "latestBookingTime"), ("保留到", "holdUntilTime"),
-                             ("最少入住晚数", "minStayNights"), ("最多预订房间数", "maxRoomCount")):
+        for label, field in (("最晚预订", "latestBookingTime"), ("房间保留至", "holdUntilTime"),
+                             ("最少入住晚数", "minStayNights"), ("单次最多预订间数", "maxRoomCount")):
             value = rule.get(field)
             if (isinstance(value, str) and value.strip()) or type(value) is int:
                 lines.append(f"{label}：{value}")
@@ -242,4 +321,4 @@ class ProductAction:
                     lines.append(f"{label}：{value}")
             hours = payload.get("cancel_before_hours")
             if type(hours) is int and hours >= 0:
-                lines.append(f"取消提前量：{hours} 小时；中台未用这个字段说明是否收费。")
+                lines.append(f"取消时间要求：提前 {hours} 小时")

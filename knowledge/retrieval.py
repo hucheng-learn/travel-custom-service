@@ -78,7 +78,8 @@ class KnowledgeProvider:
         if item := self._faq.get(query):
             return "knowledge", self._cite(item.answer, item.section)
         if "退款" in text and re.search(r"这笔订单|我的订单|某笔订单|订单\s*[A-Za-z0-9]", text):
-            return "clarify", "通用资料不能确认某笔订单的退款结果。请在中台核对这笔订单的退款申请和退款流水。"
+            # 具体订单需要查实际退款记录，通用说明无法确认是否到账。
+            return "clarify", "请发送「查退款进度 订单号 你的订单号」，核对这笔订单的退款情况。"
         if MISSING_DEADLINE.search(text):
             return "knowledge", self._cite("现有资料没有提供到账时限，我不能确认具体多久。可以先核对退款申请和流水状态。", "查询退款进度")
         if query in {"退款", "政策", "这个政策是什么", "退改规则", "能退吗", "怎么退", "如何退", "退款政策"}:

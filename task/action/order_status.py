@@ -182,7 +182,7 @@ class OrderStatusAction(OrderQueryAction):
                 elif paid_at:
                     lines.append(f"支付时间：{paid_at}。")
         else:
-            lines.append("没有查到成功支付的流水。" if payment_rows else "中台没有返回支付流水。")
+            lines.append("没有查到成功的支付记录。" if payment_rows else "没有查到支付记录。")
         return (
             {"type": "text", "text": "\n".join(lines)},
             {"type": "object", "object": {

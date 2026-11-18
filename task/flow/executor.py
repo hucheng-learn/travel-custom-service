@@ -14,14 +14,15 @@ from task.sales_state import SalesDraft
 
 
 MAX_STEPS_PER_TURN = 24
+# 给旅客说明查到了什么及下一步怎么做，区分没有匹配结果和暂时无法查询。
 TEXT_TEMPLATES = {
     "order_not_found": "没在你的订单里查到这个订单号，请核对后再发一次。",
     "order_search_limited": "这次只查了最近一部分订单，还不能确定是否存在。你可以核对订单号后再试。",
-    "order_unavailable": "暂时没能从中台查到订单或支付状态。请稍后再发一次订单号。",
-    "itinerary_unavailable": "暂时没能从中台查到行程。请稍后再发一次订单号或订单卡片。",
+    "order_unavailable": "暂时无法查询订单或支付状态。请稍后再发一次订单号。",
+    "itinerary_unavailable": "暂时无法查询行程。请稍后再发一次订单号或订单卡片。",
     "date_itinerary_unavailable": "暂时没能完整读取订单行程。请稍后再发查询日期，或提供订单号。",
-    "product_not_found": "中台未返回符合这些地区、日期或名称条件的可用商品。可以换日期或补充条件再查。",
-    "product_unavailable": "暂时没能拿到中台商品结果。你可以稍后重试，或换日期、地区查询。",
+    "product_not_found": "没有查到符合这些条件的可订商品。可以换日期或补充条件再查。",
+    "product_unavailable": "暂时无法查询商品，请稍后再试。",
 }
 RESULT_TEMPLATES = {"order_status", "order_itinerary", "date_itinerary", "product_result", "product_options"}
 TEMPLATES = set(TEXT_TEMPLATES) | RESULT_TEMPLATES
@@ -105,6 +106,16 @@ class FlowExecutor:
             return step.prompt
         return None
 
+    def _apply_area_reply(self, task: FlowTask, slot: str, reference: SlotValue) -> SlotValue:
+        previous = task.slots.get(slot)
+        if (self._areas is not None and task.missing_slots == ["area"]
+                and isinstance(previous, ProductRequest) and isinstance(reference, ProductRequest)
+                and previous.kind == reference.kind and previous.area and reference.area
+                and previous.business_date == reference.business_date):
+            # 补槽沿用原地区的候选范围，明确改了日期或品类时才按新条件查询。
+            return reference.model_copy(update={"area": self._areas.refine(previous.area, reference.area)})
+        return reference
+
     async def run(self, task: FlowTask, user_id: int, reference: SlotValue | None) -> FlowResult:
         flow = self._flows[task.flow_id]
         messages: list[Reply] = []
@@ -117,7 +128,7 @@ class FlowExecutor:
                     task.step_id = step.next
                 case CollectStep():
                     if reference is not None:
-                        task.slots[step.slot] = reference
+                        task.slots[step.slot] = self._apply_area_reply(task, step.slot, reference)
                         reference = None
                     if prompt := self._collect_prompt(task, step):
                         messages.append(text_reply(prompt))
@@ -132,6 +143,8 @@ class FlowExecutor:
                     if step.template in RESULT_TEMPLATES:
                         if outcome is None or outcome.outcome not in {"ok", "need_selection"}:
                             raise ValueError("结果模板需要有效的中台查询结果")
+                        messages.extend(outcome.messages)
+                    elif step.template == "product_not_found" and outcome and outcome.messages:
                         messages.extend(outcome.messages)
                     else:
                         messages.append(text_reply(TEXT_TEMPLATES[step.template]))

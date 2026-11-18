@@ -4,7 +4,7 @@ from integration.regions import AreaCatalog
 from knowledge.retrieval import looks_like_knowledge
 from plan.fixed_order_plan import ITINERARY_QUERY, ORDER_QUERY, fallback_plan
 from plan.models import DATE_ITINERARY, ITINERARY, PRODUCT, TurnPlan
-from plan.product_models import TRANSPORT_KINDS, ProductClues, ProductKind, ProductRequest
+from plan.product_models import HOTEL_TYPE_NAMES, TRANSPORT_KINDS, ProductClues, ProductKind, ProductRequest
 from plan.travel_dates import find_date_texts
 from task.flow.executor import DialogueState
 
@@ -22,6 +22,26 @@ FLIGHT_CODE = re.compile(r"(?<![A-Za-z0-9])[A-Z0-9]{2}[0-9]{3,4}(?![A-Za-z0-9])"
 DETAIL_WORDS = re.compile(r"详情|设施|房型|票种|座席|座位|座舱|舱位|几点|开放|时刻|车型|载客|规则|退改|免费取消")
 TRANSFER_PRICE = re.compile(r"多少钱|价格|报价|费用|怎么收费")
 REQUEST_SEPARATOR = re.compile(r"[；;→？?\r\n]+")
+QUOTED_NAME = re.compile(r"[「《“]([^」》”]{1,80})[」》”]")
+HOTEL_STAR = re.compile(r"(?<!\d)([345三四五])\s*星(?:级)?")
+HOTEL_TYPE = re.compile(r"(豪华|商务|度假|精品)(型|(?=\s*酒店))")
+HOTEL_TYPE_PREFIX = re.compile(r"(?:^|[\s，、,。找查搜看]|有哪些|有没有|推荐|星(?:级)?)\s*$")
+HOTEL_DETAIL_SUFFIX = re.compile(r"(?:的)?(?:房型(?:详情)?|详情)[。？?]?$")
+HOTEL_STAR_CODES = {"三": "3", "四": "4", "五": "5"}
+HOTEL_TYPE_CODES = {label.removesuffix("型"): code for code, label in HOTEL_TYPE_NAMES.items()}
+
+
+def hotel_filters(text: str) -> dict[str, str]:
+    # 引号内是酒店名，只从其余原文提取筛选条件，避免把名称里的“度假”当成类型。
+    criteria = QUOTED_NAME.sub("", text)
+    filters = {}
+    if star := HOTEL_STAR.search(criteria):
+        filters["hotel_star_rating"] = HOTEL_STAR_CODES.get(star[1], star[1])
+    if (category := HOTEL_TYPE.search(criteria)) and (
+        category[2] or HOTEL_TYPE_PREFIX.search(criteria[:category.start()])
+    ):
+        filters["hotel_type"] = HOTEL_TYPE_CODES[category[1]]
+    return filters
 
 
 def has_multiple_requests(text: str) -> bool:
@@ -58,6 +78,11 @@ def stage_three_plan(text: str, state: DialogueState, areas: AreaCatalog | None)
             return None
         previous = active.slots.get("product_request") if active and active.flow_id == PRODUCT else None
         saved = previous if isinstance(previous, ProductRequest) and previous.kind == kind else None
+        if saved and active and active.missing_slots == ["area"] and locations and not dates:
+            # “南京市鼓楼区有哪些景点”也可以是在回答上一轮的地区追问，沿用已填日期。
+            return TurnPlan(route="task", command="set_slots", product=_product_clues(
+                text, kind, dates, locations, saved, active.missing_slots,
+            ))
         return TurnPlan(
             route="task", command="start_flow", flow_id=PRODUCT,
             product=_product_clues(text, kind, dates, locations, saved, active.missing_slots if active else None),
@@ -73,7 +98,8 @@ def stage_three_plan(text: str, state: DialogueState, areas: AreaCatalog | None)
     previous = active.slots.get("product_request")
     if not isinstance(previous, ProductRequest) or previous.kind is None:
         return None
-    if not dates and not locations and active.missing_slots != ["keyword"]:
+    filtered_hotel = previous.kind == "hotel" and bool(hotel_filters(text))
+    if not dates and not locations and active.missing_slots != ["keyword"] and not filtered_hotel:
         return None
     return TurnPlan(
         route="task", command="set_slots",
@@ -108,8 +134,14 @@ def _product_clues(
     pattern = TRAIN_CODE if kind == "train" else FLIGHT_CODE if kind == "flight" else None
     if pattern and (code := pattern.search(text)):
         clues.keyword = code[0]
-    elif match := re.search(r"[「《“]([^」》”]{1,80})[」》”]", text):
+    elif match := QUOTED_NAME.search(text):
         clues.keyword = match[1]
     elif missing == ["keyword"] and not dates and 0 < len(text.strip()) <= 80:
-        clues.keyword = text.strip()
+        keyword = text.strip()
+        if kind == "hotel":
+            if hotel_filters(text):
+                return clues
+            # 旅客可以直接回酒店名称，也可以在名称后加“的房型”。
+            keyword = HOTEL_DETAIL_SUFFIX.sub("", keyword).strip()
+        clues.keyword = keyword or None
     return clues

@@ -6,6 +6,7 @@ from plan.fixed_order_plan import CALENDAR_DATE, CURRENT_ORDER_WORDS, explicit_c
 from plan.models import DATE_ITINERARY, PRODUCT, SLOT_FOR_FLOW, Command, FlowId, OrderReference, PlanRoute, SlotValue, TurnPlan
 from plan.product_models import DateRequest, ProductClues, ProductRequest
 from plan.travel_dates import business_zone, calendar_today, parse_date_text
+from plan.travel_plans import hotel_filters
 from task.flow.executor import DialogueState, FlowExecutor, FlowTask
 
 
@@ -125,6 +126,13 @@ class TurnPlanValidator:
         changes = {}
         if clues.kind:
             changes["kind"] = clues.kind
+        if (clues.kind or saved.kind) == "hotel":
+            filters = hotel_filters(text)
+            # 城市和完整日期表示重新查酒店。补日期或选酒店时，沿用已确认的筛选条件。
+            if clues.area and clues.date_text and clues.end_date_text:
+                changes.update(hotel_star_rating=None, hotel_type=None, keyword=None)
+            if filters:
+                changes.update(filters, keyword=None)
         for field in ("area", "origin", "destination", "keyword"):
             value = getattr(clues, field)
             if value is not None:

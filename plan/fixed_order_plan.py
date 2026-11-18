@@ -62,6 +62,19 @@ def extract_order_number(text: str) -> str | None:
     return None
 
 
+def explicit_order_itinerary(text: str) -> TurnPlan | None:
+    # 简短的查行程指令直接进入订单行程流程，先收集订单号。带日期的查询由日期流程处理。
+    request = re.sub(r"^(?:(?:请|帮我|麻烦)\s*)+", "", text.strip()).rstrip("。！!？?").strip()
+    query = ITINERARY_QUERY.match(request)
+    if query is None:
+        return None
+    suffix = request[query.end():].strip()
+    order_number = extract_order_number(suffix)
+    if suffix and order_number is None:
+        return None
+    return TurnPlan(route="task", command="start_flow", flow_id=ITINERARY, order_number=order_number)
+
+
 def fallback_plan(text: str, *, waiting_for_order: bool) -> TurnPlan:
     query = ITINERARY_QUERY.search(text)
     flow_id = ITINERARY

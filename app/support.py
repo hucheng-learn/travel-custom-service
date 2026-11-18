@@ -174,10 +174,10 @@ ERRORS = {
     TicketNotFoundError: (404, "TICKET_NOT_FOUND", "没有找到这个工单。", False),
     MessageIdConflictError: (409, "MESSAGE_ID_CONFLICT", "相同消息 ID 不能用于不同内容。", False),
     TurnInProgressError: (409, "TURN_IN_PROGRESS", "这轮对话正在处理，请稍后重试。", True),
-    RequestValidationError: (422, "INVALID_REQUEST", "请求格式不正确，请检查消息类型、字段或参数。", False),
-    StorageUnavailableError: (503, "STORAGE_UNAVAILABLE", "客服数据库暂时不可用。", True),
-    SQLAlchemyError: (503, "STORAGE_UNAVAILABLE", "客服数据库暂时不可用。", True),
-    UpstreamUnavailableError: (503, "UPSTREAM_UNAVAILABLE", "旅游中台暂时无法确认用户身份。", True),
+    RequestValidationError: (422, "INVALID_REQUEST", "请求有误，请检查输入后再试。", False),
+    StorageUnavailableError: (503, "STORAGE_UNAVAILABLE", "客服暂时无法处理请求，请稍后再试。", True),
+    SQLAlchemyError: (503, "STORAGE_UNAVAILABLE", "客服暂时无法处理请求，请稍后再试。", True),
+    UpstreamUnavailableError: (503, "UPSTREAM_UNAVAILABLE", "暂时无法验证用户身份，请稍后再试。", True),
 }
 
 
