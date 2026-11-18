@@ -1,0 +1,16 @@
+# 按业务出行日查行程；与按订单号查行程分开收集线索。
+slots:
+  travel_date:
+    type: travel_date
+flows:
+  itinerary_date_query:
+    steps:
+      - {id: start, type: start, next: collect_date}
+      - {id: collect_date, type: collect, slot: travel_date, prompt: "请发出行日期，例如「下周一」。", next: lookup}
+      - id: lookup
+        type: action
+        action: query_itinerary_by_date
+        routes: {ok: show, unavailable: retry}
+      - {id: show, type: response, template: date_itinerary, next: end}
+      - {id: retry, type: response, template: date_itinerary_unavailable, next: collect_date, pause: true}
+      - {id: end, type: end}

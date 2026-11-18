@@ -1,0 +1,45 @@
+# 阶段二只查指定订单的行程。按出行日期筛选留到阶段三。
+slots:
+  order_ref:
+    type: order_ref
+
+flows:
+  itinerary_query:
+    steps:
+      - id: start
+        type: start
+        next: collect_order
+      - id: collect_order
+        type: collect
+        slot: order_ref
+        prompt: 请发这笔订单的订单号，或发送订单卡片，我帮你查行程。
+        next: lookup
+      - id: lookup
+        type: action
+        action: query_order_itinerary
+        routes:
+          ok: show_result
+          not_found: ask_again
+          search_limited: explain_limit
+          unavailable: explain_unavailable
+      - id: show_result
+        type: response
+        template: order_itinerary
+        next: end
+      - id: ask_again
+        type: response
+        template: order_not_found
+        next: collect_order
+        pause: true
+      - id: explain_limit
+        type: response
+        template: order_search_limited
+        next: collect_order
+        pause: true
+      - id: explain_unavailable
+        type: response
+        template: itinerary_unavailable
+        next: collect_order
+        pause: true
+      - id: end
+        type: end

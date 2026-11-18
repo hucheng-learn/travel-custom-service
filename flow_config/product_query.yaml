@@ -1,0 +1,18 @@
+# 所有商品都先收集真实查询条件；商品种类决定哪些字段还需要追问。
+slots:
+  product_request:
+    type: product_request
+flows:
+  product_query:
+    steps:
+      - {id: start, type: start, next: collect_product}
+      - {id: collect_product, type: collect, slot: product_request, prompt: "请告诉我想查的商品。", next: lookup}
+      - id: lookup
+        type: action
+        action: search_public_products
+        routes: {ok: show, not_found: missing, unavailable: retry, need_selection: choose}
+      - {id: show, type: response, template: product_result, next: end}
+      - {id: missing, type: response, template: product_not_found, next: collect_product, pause: true}
+      - {id: retry, type: response, template: product_unavailable, next: collect_product, pause: true}
+      - {id: choose, type: response, template: product_options, next: collect_product, pause: true}
+      - {id: end, type: end}

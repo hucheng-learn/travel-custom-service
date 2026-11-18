@@ -1,0 +1,46 @@
+# 文本订单号和订单卡片最终都填到 order_ref，由查询动作区分来源。
+slots:
+  order_ref:
+    type: order_ref
+
+flows:
+  order_status_query:
+    steps:
+      - id: start
+        type: start
+        next: collect_order
+      - id: collect_order
+        type: collect
+        slot: order_ref
+        prompt: 请发订单号，我帮你查询订单和支付状态。
+        next: lookup
+      - id: lookup
+        type: action
+        action: query_order_status
+        routes:
+          ok: show_result
+          not_found: ask_again
+          search_limited: explain_limit
+          unavailable: explain_unavailable
+      - id: show_result
+        type: response
+        template: order_status
+        next: end
+      # 查不到或中台暂不可用时，先解释，再回到收集订单号的位置等待下一轮。
+      - id: ask_again
+        type: response
+        template: order_not_found
+        next: collect_order
+        pause: true
+      - id: explain_limit
+        type: response
+        template: order_search_limited
+        next: collect_order
+        pause: true
+      - id: explain_unavailable
+        type: response
+        template: order_unavailable
+        next: collect_order
+        pause: true
+      - id: end
+        type: end

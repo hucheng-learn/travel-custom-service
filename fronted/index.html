@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>旅游客服 · 对话调试台</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark" aria-hidden="true">旅</span><span>旅游客服 <small>对话调试台</small></span></div>
+    <div class="toplinks"><span class="badge">本机联调</span><a href="/docs">接口文档 ↗</a></div>
+  </header>
+  <main class="workspace">
+    <!-- 左侧选会话和验收话术，中间聊天，右侧看任务推进。 -->
+    <aside class="panel setup">
+      <h2>会话设置</h2>
+      <form id="session-form">
+        <label for="user-id">测试用户 ID</label>
+        <input id="user-id" inputmode="numeric" autocomplete="off" maxlength="19" placeholder="例如 1" required>
+        <label for="session-id">已有会话 ID <span class="subtle">可选</span></label>
+        <input id="session-id" autocomplete="off" maxlength="36" placeholder="继续旧会话时粘贴">
+        <div class="actions">
+          <button class="primary" type="submit">新建会话</button>
+          <button id="restore" type="button">加载旧会话</button>
+        </div>
+      </form>
+      <p class="helper">填中台已有的测试用户 ID，第一次发送时会自动创建或加载会话。</p>
+      <div class="divider"></div>
+      <h2>验收话术</h2>
+      <p class="helper">点击填入输入框，一次发送一条。</p>
+      <div class="samples">
+        <button type="button" data-prompt="帮我查订单">查订单</button>
+        <button type="button" data-prompt="帮我查行程">查订单行程</button>
+        <button type="button" data-prompt="下周一的出行">按日期查行程</button>
+        <button type="button" data-prompt="明天北京有哪些酒店">查酒店</button>
+        <button type="button" data-prompt="后天退房">补退房日期</button>
+        <button type="button" data-prompt="明天北京有哪些景点">查景点</button>
+        <button type="button" data-prompt="明天北京到上海的高铁">查高铁</button>
+        <button type="button" data-prompt="明天北京到上海的机票">查机票</button>
+        <button type="button" data-prompt="明天北京到天津的汽车票">查汽车票</button>
+        <button type="button" data-prompt="明天北京有哪些接机服务">查接机</button>
+        <button type="button" data-prompt="明天从北京到北京的接送多少钱">问接送报价</button>
+        <button type="button" data-prompt="退款审核通过就到账了吗">问退款规则</button>
+        <button type="button" data-prompt="退款多久到账">问到账时限</button>
+        <button type="button" data-prompt="这个政策是什么">试政策澄清</button>
+        <button type="button" data-prompt="申请退款">申请退款</button>
+        <button type="button" data-prompt="查退款进度">查退款进度</button>
+        <button type="button" data-prompt="提交工单">提交工单</button>
+      </div>
+    </aside>
+    <section class="panel chat" aria-labelledby="chat-title">
+      <header class="chat-header">
+        <div><p class="eyebrow">会话工作区</p><h1 id="chat-title">旅游客服对话</h1></div>
+        <span class="session-chip" id="connection-label">未连接</span>
+      </header>
+      <div class="chat-body">
+        <div class="history-bar"><button id="older" type="button" hidden>加载更早的消息</button></div>
+        <div id="messages" class="messages" role="log" aria-label="对话记录" aria-live="polite">
+          <div class="empty"><span aria-hidden="true">旅</span><strong>开始一段对话</strong><p>在左侧填测试用户 ID，直接发送「帮我查订单」。</p></div>
+        </div>
+      </div>
+      <footer class="composer">
+        <div id="notice" class="notice" role="status" hidden></div>
+        <pre id="stream-preview" class="notice stream-preview" aria-live="off" hidden></pre>
+        <div id="error" class="error" role="alert" hidden></div>
+        <form id="text-form">
+          <label class="sr-only" for="message-text">消息内容</label>
+          <textarea id="message-text" maxlength="2000" rows="2" placeholder="输入一个查询，比如：明天北京有哪些酒店" required></textarea>
+          <div class="sendbar">
+            <span class="helper">Enter 发送 · Shift + Enter 换行</span>
+            <div class="actions">
+              <label class="stream-mode"><input id="stream-mode" type="checkbox"> SSE</label>
+              <button id="disconnect" type="button" hidden>断开流</button>
+              <button id="retry" type="button" hidden>重试上一条</button>
+              <button id="send" type="submit" class="primary">发送消息</button></div>
+          </div>
+        </form>
+      </footer>
+    </section>
+    <aside class="panel diagnostics">
+      <div class="panel-heading"><h2>任务状态</h2><button id="refresh" type="button" disabled>刷新</button></div>
+      <p class="helper" id="version">尚未连接会话</p>
+      <div id="task-state" class="task-state"><p class="helper">连接后可查看活动和暂停任务。</p></div>
+      <div class="samples">
+        <button type="button" data-prompt="暂停所有任务">暂停所有</button>
+        <button type="button" data-prompt="继续上一个任务">继续上一个</button>
+        <button type="button" data-prompt="取消当前任务">取消当前</button>
+      </div>
+      <details class="snapshot"><summary>查看原始状态 JSON</summary><pre id="snapshot">—</pre></details>
+      <div class="divider"></div>
+      <h2>订单卡片</h2>
+      <form id="order-form">
+        <label for="order-id">本人订单的 ID</label>
+        <input id="order-id" inputmode="numeric" maxlength="19" autocomplete="off" placeholder="填 orderId，不是 orderNo" required>
+        <button id="send-order" type="submit">发送订单卡片</button>
+      </form>
+      <p class="helper">也可点击聊天记录中的「使用此订单」。</p>
+      <div class="divider"></div>
+      <h2>工单查询</h2>
+      <form id="ticket-form">
+        <label for="ticket-id">工单 ID</label>
+        <input id="ticket-id" inputmode="numeric" maxlength="19" placeholder="填工单卡片里的 ID" required>
+        <button type="submit">查工单</button>
+      </form>
+      <p class="helper" id="ticket-result" hidden></p>
+    </aside>
+  </main>
+</body>
+</html>

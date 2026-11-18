@@ -1,0 +1,13 @@
+# 售后按顺序补字段；提交步骤只能由有效确认触发。
+ticket_next_step: 工单已登记，请保留编号查询进度。
+flows:
+  refund_request:
+    order: 请发本人订单号，或发送订单卡片。
+    item: 请发要退款的订单明细 ID。
+    refund_type: 请回复「全额」或「部分退款」。
+    amount: 请发部分退款金额，最多两位小数。
+    reason: 请简要说明退款原因（不要填写证件号等敏感信息）。
+  ticket_submit:
+    ticket_type: 请选择「投诉」「售后」或「退款咨询」。
+    order: 请发本人订单号、订单卡片，或回复「无订单」。
+    description: 请描述你遇到的问题（不要填写证件号等敏感信息）。
