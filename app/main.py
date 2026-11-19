@@ -1,5 +1,5 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -56,14 +56,13 @@ def load_supported_flows() -> dict[str, LoadedFlow]:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = Settings()
     flows = load_supported_flows()
     sales_config = load_sales_config(FLOW_DIR / "after_sales.yaml")
     async with AsyncExitStack() as stack:
         # 启动只准备资源，不连接数据库或调用中台；未配置时仍可探活。
         app.state.support_service = None
-        app.state.preview_user_id = settings.support_preview_user_id
         if settings.support_database_url:
             url = make_url(settings.support_database_url)
             if url.drivername != "mysql+asyncmy" or not url.database:

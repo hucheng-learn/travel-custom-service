@@ -10,6 +10,7 @@ from integration.travel_client import TravelClient, TravelClientError, TravelHTT
 from plan.models import SLOT_FOR_FLOW
 from repository.dialogue import DialogueRepository, ReservedTurn
 from repository.operations import OperationRepository, TicketNotFoundError
+from service.objects import ObjectKind, travel_objects
 from task.flow.executor import DialogueState
 
 
@@ -62,7 +63,7 @@ class SupportService:
             raise TicketNotFoundError
         return await self._operations.get_ticket(user_id, ticket_id)
 
-    async def create_session(self, user_id: int) -> dict:
+    async def validate_identity(self, user_id: int) -> None:
         if self._travel is None:
             raise UpstreamUnavailableError
         try:
@@ -77,9 +78,46 @@ class SupportService:
             raise UpstreamUnavailableError
         if str(identity["userId"]) != str(user_id) or identity["statusCode"] == "inactive":
             raise UnauthenticatedError
+
+    async def create_session(self, user_id: int) -> dict:
         # 先确认中台身份，再创建归属该用户的空白会话。
+        await self.validate_identity(user_id)
         row = await self._repository.create(user_id, DialogueState().model_dump(mode="json"))
         return {"sessionId": str(row.id), "userId": row.user_id, "createdAt": _api_time(row.created_at)}
+
+    async def list_sessions(self, user_id: int, page_no: int) -> dict:
+        page_size = 20
+        rows = await self._repository.list_sessions(user_id, (page_no - 1) * page_size, page_size + 1)
+        sessions = []
+        for session_id, updated_at, first_input in rows[:page_size]:
+            title = "新对话"
+            if first_input and first_input["type"] == "text":
+                title = " ".join(first_input["text"].split())[:60] or title
+            elif first_input and first_input.get("object", {}).get("type") == "order":
+                title = "订单咨询"
+            sessions.append({"sessionId": str(session_id), "title": title, "updatedAt": _api_time(updated_at)})
+        return {"list": sessions, "hasMore": len(rows) > page_size}
+
+    async def list_objects(self, user_id: int, kind: ObjectKind, page_no: int) -> dict:
+        if kind == "tickets":
+            page_size = 10
+            rows = await self._operations.list_tickets(
+                user_id, (page_no - 1) * page_size, page_size + 1,
+            ) if self._operations is not None else []
+            return {"list": rows[:page_size], "hasMore": len(rows) > page_size}
+
+        if self._travel is None:
+            raise UpstreamUnavailableError
+        try:
+            cards, has_more = await travel_objects(self._travel, user_id, kind, page_no)
+        except TravelHTTPError as error:
+            if error.status_code in {401, 403}:
+                raise UnauthenticatedError from error
+            raise UpstreamUnavailableError from error
+        except (TravelClientError, ValueError) as error:
+            # 中台异常单独返回，页面可以就地重试，不当成空列表。
+            raise UpstreamUnavailableError from error
+        return {"list": cards, "hasMore": has_more}
 
     async def reserve_message(
         self, session_id: UUID, user_id: int, message_id: UUID, input_data: dict,

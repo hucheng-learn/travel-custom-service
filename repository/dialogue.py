@@ -55,6 +55,24 @@ class DialogueRepository:
         async with self._sessions() as db:
             return await self._owned(db, session_id, user_id)
 
+    async def list_sessions(self, user_id: int, offset: int, limit: int) -> list[tuple[UUID, datetime, dict | None]]:
+        # 只为本页会话取首条已完成输入生成标题，不读取整段对话或任务快照。
+        first_input = (
+            select(SupportTurn.input_json)
+            .where(SupportTurn.session_id == SupportSession.id, SupportTurn.status == "completed")
+            .order_by(SupportTurn.seq)
+            .limit(1)
+            .scalar_subquery()
+        )
+        query = (
+            select(SupportSession.id, SupportSession.updated_at, first_input)
+            .where(SupportSession.user_id == user_id)
+            .order_by(SupportSession.updated_at.desc(), SupportSession.id.desc())
+            .offset(offset).limit(limit)
+        )
+        async with self._sessions() as db:
+            return list((await db.execute(query)).tuples())
+
     async def history(
         self, session_id: UUID, user_id: int, before_seq: int | None, page_size: int
     ) -> tuple[list[SupportTurn], int | None]:

@@ -6,13 +6,24 @@ const scroller = messages.closest(".chat-body");
 const composer = byId("message-text");
 const textForm = byId("text-form");
 const newChatDialog = byId("new-chat-dialog");
-const storageKey = "travel-support-session";
+const previewForm = byId("preview-form");
+const previewMode = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+const previewKey = "travel-support-preview-user";
+const recentUsersKey = "travel-support-recent-users";
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const ticketStatuses = { open: "待处理", in_progress: "处理中", resolved: "已解决", closed: "已关闭" };
 const refundStatuses = { pending: "待处理", approved: "审核通过", rejected: "审核驳回", success: "退款完成" };
+const orderStatuses = { pending_payment: "待支付", paid: "已支付", in_progress: "进行中", finished: "已完成", cancelled: "已取消" };
+const productTypes = { hotel_room: "酒店住宿", scenic_ticket: "景点门票", flight_ticket: "机票", train_seat: "火车票",
+  bus_seat: "汽车票", transfer: "接送服务" };
 const rendered = new Set();
 
+let userId = null;
 let sessionId = null;
+let sessions = [];
+let sessionNextPage = 1;
+let objectKind = "orders";
+let objectPage = 0;
 let olderCursor = null;
 let confirmationId = null;
 let busy = false;
@@ -30,7 +41,7 @@ class ApiError extends Error {
 function responseError(data, status) {
   const error = data?.error;
   const messages = {
-    UNAUTHENTICATED: "请从旅行平台登录后重新打开客服。",
+    UNAUTHENTICATED: previewMode ? "该用户不可用，请核对用户 ID 后再查询。" : "请从旅行平台登录后重新打开客服。",
     SESSION_NOT_FOUND: "当前对话已失效，请开始新对话。",
     TICKET_NOT_FOUND: "未找到该工单。",
     TURN_IN_PROGRESS: "客服正在处理这条消息，请稍后重试。",
@@ -40,12 +51,14 @@ function responseError(data, status) {
   return new ApiError(message, { code, retryable: error?.retryable ?? (status >= 500 || status === 200) });
 }
 
-async function api(path, options = {}) {
+async function api(path, { previewUser = userId, ...options } = {}) {
   let response;
   try {
-    // 平台登录凭据随同源请求发送，账号身份由服务端获取。
+    // 模拟身份只从环回页面发送，服务端还会校验请求来源。平台环境随同源请求带上登录凭据。
+    const headers = new Headers(options.headers);
+    if (previewMode && previewUser) headers.set("X-Preview-User-Id", previewUser);
     response = await fetch("/api/v1/support" + path, {
-      ...options, credentials: "same-origin", cache: "no-store",
+      ...options, headers, credentials: "same-origin", cache: "no-store",
       signal: options.signal ?? AbortSignal.timeout(10000),
     });
   } catch {
@@ -120,22 +133,29 @@ function showError(text) {
 }
 
 function syncControls() {
-  for (const button of document.querySelectorAll("[data-prompt], .message-card button, #new-chat, #older, #retry")) {
-    button.disabled = busy;
+  const unavailable = busy || !userId;
+  for (const button of document.querySelectorAll(
+    "[data-prompt], .message-card button, #new-chat, #older, #retry, .sessions-list button, [data-kind], " +
+    "#more-sessions, #refresh-objects, #more-objects",
+  )) {
+    button.disabled = unavailable;
   }
+  byId("preview-user").disabled = busy;
+  byId("preview-submit").disabled = busy;
+  composer.disabled = !userId;
   for (const actions of messages.querySelectorAll("[data-confirmation]")) {
     const isActive = actions.dataset.confirmation === confirmationId;
     actions.hidden = !isActive;
     for (const button of actions.querySelectorAll("button")) button.disabled = busy || !isActive;
   }
-  byId("send").disabled = busy || !composer.value.trim();
+  byId("send").disabled = unavailable || !composer.value.trim();
   byId("retry").hidden = !pending || !requestError;
   byId("history-bar").hidden = olderCursor === null;
   byId("welcome").hidden = messages.childElementCount > 0;
   messages.hidden = !byId("welcome").hidden;
 }
 
-async function run(operation, label = "") {
+async function run(operation, label = "", onError = showError) {
   if (busy) return;
   busy = true;
   syncControls();
@@ -144,7 +164,7 @@ async function run(operation, label = "") {
   try {
     await operation();
   } catch (error) {
-    showError(error instanceof ApiError ? error.message : "操作暂未完成，请稍后再试。");
+    onError(error instanceof ApiError ? error.message : "操作暂未完成，请稍后再试。");
   } finally {
     busy = false;
     showNotice("");
@@ -161,19 +181,26 @@ function actionButton(label, onClick, className = "") {
   return button;
 }
 
-function renderCard(object) {
+function renderCard(object, sidebar = false) {
   const { type, id, title, attributes: attrs = {} } = object;
   const card = makeElement("div", "message-card");
   const actions = makeElement("div", "card-actions");
-  const titles = { order: "订单", confirmation: "确认提交", ticket: "客服工单", refund_request: "退款申请" };
+  const titles = { order: "订单", product: "已订商品", confirmation: "确认提交", ticket: "客服工单", refund_request: "退款申请" };
   card.append(makeElement("strong", "", title || titles[type] || "服务信息"));
   if (attrs.summary) card.append(makeElement("p", "", attrs.summary));
 
   if (type === "order") {
+    if (attrs.status) card.append(makeElement("p", "", orderStatuses[attrs.status] || "状态待确认"));
+    if (attrs.payableAmount != null) card.append(makeElement("p", "", "应付 ¥" + attrs.payableAmount));
     if (attrs.paidAmount != null) {
       card.append(makeElement("p", "", `实付 ${attrs.paidAmount} ${attrs.currencyCode || ""}`.trim()));
     }
-    actions.append(actionButton("使用此订单", () => queueMessage({ type: "object", object: { type, id: String(id) } })));
+    actions.append(actionButton(sidebar ? "发送订单" : "使用此订单", () => sendOrder(id)));
+  } else if (type === "product") {
+    const details = [productTypes[attrs.productType], attrs.amount != null ? "预订金额 ¥" + attrs.amount : ""];
+    if (details.some(Boolean)) card.append(makeElement("p", "", details.filter(Boolean).join(" · ")));
+    card.append(makeElement("p", "", "关联订单 " + attrs.orderNo));
+    actions.append(actionButton("发送关联订单", () => sendOrder(attrs.orderId)));
   } else if (type === "confirmation") {
     actions.dataset.confirmation = id;
     for (const [decision, label] of [["confirm", "确认提交"], ["reject", "不提交"]]) {
@@ -227,11 +254,8 @@ function sessionPath() {
 
 function rememberSession(id) {
   sessionId = id;
-  // 本标签页只保存会话标识，刷新时重新向服务端请求历史并校验归属。
-  try {
-    if (id) sessionStorage.setItem(storageKey, id);
-    else sessionStorage.removeItem(storageKey);
-  } catch { /* 禁用浏览器存储时仍可继续当前对话。 */ }
+  // 浏览器只记住每个账号最后打开的会话，消息和会话列表由服务端按归属读取。
+  writeStorage("travel-support-session:" + userId, id);
 }
 
 function showHistory(history, prepend = false) {
@@ -247,6 +271,148 @@ function showHistory(history, prepend = false) {
   syncControls();
   if (prepend) scroller.scrollTop = oldTop + scroller.scrollHeight - oldHeight;
   else scrollToLatest();
+}
+
+function readStorage(key) {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+
+function writeStorage(key, value) {
+  try {
+    if (value === null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, value);
+  } catch { /* 禁用浏览器存储时仍可继续使用。 */ }
+}
+
+function validUserId(id) {
+  return typeof id === "string" && /^[0-9]{1,19}$/.test(id) && BigInt(id) > 0n && BigInt(id) < 2n ** 63n;
+}
+
+function recentUsers() {
+  try { return JSON.parse(readStorage(recentUsersKey) || "[]").filter(validUserId).slice(0, 10); }
+  catch { return []; }
+}
+
+function showRecentUsers() {
+  byId("recent-users").replaceChildren(...recentUsers().map((id) => {
+    const option = makeElement("option");
+    option.value = id;
+    return option;
+  }));
+}
+
+function showPreviewStatus(text, isError = false) {
+  const status = byId("preview-status");
+  status.textContent = text;
+  status.toggleAttribute("data-error", isError);
+}
+
+function renderSessions() {
+  const dateFormat = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  byId("sessions-list").replaceChildren(...sessions.map((session) => {
+    const button = actionButton("", () => {
+      if (session.sessionId !== sessionId) run(() => openSession(session.sessionId), "正在读取历史消息…");
+    });
+    button.setAttribute("aria-current", String(session.sessionId === sessionId));
+    button.append(makeElement("span", "session-title", session.title));
+    const updated = new Date(session.updatedAt);
+    if (!Number.isNaN(updated.valueOf())) button.append(makeElement("span", "session-time", dateFormat.format(updated)));
+    return button;
+  }));
+}
+
+async function loadSessions(page = 1) {
+  const status = byId("sessions-status");
+  const more = byId("more-sessions");
+  status.textContent = "正在读取会话…";
+  sessionNextPage = page;
+  try {
+    const result = await api("/sessions?pageNo=" + page);
+    // 如果其他标签页刚更新过历史，翻页结果可能重复，合并时按会话 ID 去重。
+    const rows = page === 1 ? result.list : [...sessions, ...result.list];
+    sessions = [...new Map(rows.map((row) => [row.sessionId, row])).values()];
+    sessionNextPage = page + 1;
+    renderSessions();
+    status.textContent = sessions.length ? "" : "暂无会话。发送消息或点击新对话开始。";
+    more.textContent = "更多会话";
+    more.hidden = !result.hasMore;
+  } catch (error) {
+    status.textContent = error.message;
+    more.textContent = "重试";
+    more.hidden = false;
+  }
+}
+
+function recordSession(summary) {
+  sessions = [summary, ...sessions.filter((item) => item.sessionId !== summary.sessionId)];
+  byId("sessions-status").textContent = "";
+  renderSessions();
+}
+
+function startSession(session) {
+  rememberSession(session.sessionId);
+  recordSession({ sessionId, title: "新对话", updatedAt: session.createdAt });
+}
+
+async function openSession(id) {
+  const history = await api("/sessions/" + encodeURIComponent(id) + "/messages");
+  resetConversation();
+  rememberSession(id);
+  showHistory(history);
+  renderSessions();
+  await readConfirmation();
+}
+
+function selectObjectKind(kind) {
+  objectKind = kind;
+  objectPage = 0;
+  byId("objects-list").replaceChildren();
+  byId("more-objects").hidden = true;
+  for (const button of document.querySelectorAll("[data-kind]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.kind === kind));
+  }
+}
+
+async function loadObjects(page = 1) {
+  const list = byId("objects-list");
+  const status = byId("objects-status");
+  status.textContent = "正在查询卡片…";
+  try {
+    const response = await api(`/objects/${objectKind}?pageNo=${page}`);
+    const cards = response.list.map((item) => renderCard(item, true));
+    if (page === 1) list.replaceChildren(...cards);
+    else list.append(...cards);
+    objectPage = page;
+    byId("more-objects").hidden = !response.hasMore;
+    status.textContent = list.childElementCount ? "" : "当前用户暂无这类卡片。";
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function selectUser(previewUser) {
+  const identity = await api("/me", { previewUser });
+  const changed = userId !== identity.userId;
+
+  if (changed) {
+    // 先清除上一位用户的消息、重试请求和卡片，再加载新身份对应的内容。
+    resetConversation();
+    userId = identity.userId;
+    sessions = [];
+    sessionNextPage = 1;
+    byId("more-sessions").hidden = true;
+    renderSessions();
+    selectObjectKind("orders");
+  }
+  if (previewMode) {
+    byId("preview-user").value = userId;
+    writeStorage(previewKey, userId);
+    writeStorage(recentUsersKey, JSON.stringify([userId, ...recentUsers().filter((id) => id !== userId)].slice(0, 10)));
+    showRecentUsers();
+    showPreviewStatus("当前用户 " + userId);
+  }
+  await Promise.all([loadSessions(), loadObjects()]);
+  if (changed) await restoreConversation();
 }
 
 async function readConfirmation() {
@@ -269,11 +435,15 @@ function newMessageId() {
 }
 
 function queueMessage(input) {
-  if (busy) return;
+  if (busy || !userId) return;
   // 按回车重发相同内容时也复用消息 ID，防止一次确认变成两次写操作。
   const key = JSON.stringify(input);
   if (pending?.key !== key) pending = { key, body: { ...input, messageId: newMessageId() } };
   sendPending();
+}
+
+function sendOrder(id) {
+  queueMessage({ type: "object", object: { type: "order", id: String(id) } });
 }
 
 function sendPending() {
@@ -295,7 +465,7 @@ async function deliver(body) {
   try {
     if (!sessionId) {
       const session = await api("/sessions", { method: "POST" });
-      rememberSession(session.sessionId);
+      startSession(session);
     }
     reply = await readReply(sessionPath() + "/messages", body, preview);
   } catch (error) {
@@ -312,32 +482,66 @@ async function deliver(body) {
   const previousConfirmation = confirmationId;
   confirmationId = reply.messages.find((item) => item.object?.type === "confirmation")?.object.id ?? null;
   renderTurn({ ...reply, input: body }, entry);
+  const current = sessions.find((item) => item.sessionId === sessionId);
+  if (current) {
+    const title = rendered.size === 1 && olderCursor === null
+      ? (body.type === "text" ? Array.from(body.text.trim().replace(/\s+/g, " ")).slice(0, 60).join("") : "订单咨询")
+      : current.title;
+    recordSession({ sessionId, title, updatedAt: new Date().toISOString() });
+  }
   scrollToLatest();
   // 没有新确认卡时，只有上一轮还有待确认事项才需要查它是否有效。
   if (previousConfirmation && !confirmationId) await readConfirmation();
 }
 
-function startNewChat() {
-  rememberSession(null);
+function resetConversation() {
+  sessionId = null;
   confirmationId = null;
   pending = null;
   requestError = "";
   composer.value = "";
   showError("");
   showHistory({ list: [] });
+}
+
+async function startNewChat() {
+  const session = await api("/sessions", { method: "POST" });
+  resetConversation();
+  startSession(session);
   composer.focus();
 }
 
 byId("new-chat").addEventListener("click", () => {
-  if (!sessionId && !pending && !composer.value.trim()) {
-    composer.focus();
+  if (!pending && !composer.value.trim()) {
+    run(startNewChat, "正在创建新对话…");
     return;
   }
   newChatDialog.returnValue = "cancel";
   newChatDialog.showModal();
 });
 newChatDialog.addEventListener("close", () => {
-  if (newChatDialog.returnValue === "start") startNewChat();
+  if (newChatDialog.returnValue === "start") run(startNewChat, "正在创建新对话…");
+});
+byId("more-sessions").addEventListener("click", () => run(() => loadSessions(sessionNextPage)));
+byId("refresh-objects").addEventListener("click", () => run(() => loadObjects()));
+byId("more-objects").addEventListener("click", () => run(() => loadObjects(objectPage + 1)));
+for (const button of document.querySelectorAll("[data-kind]")) {
+  button.addEventListener("click", () => run(async () => {
+    if (button.dataset.kind !== objectKind) selectObjectKind(button.dataset.kind);
+    await loadObjects();
+  }));
+}
+previewForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const id = byId("preview-user").value.trim();
+  if (!validUserId(id)) {
+    showPreviewStatus("请输入有效的用户 ID。", true);
+    return;
+  }
+  showPreviewStatus("正在确认用户…");
+  run(() => selectUser(BigInt(id).toString()), "", (message) => {
+    showPreviewStatus(userId ? `${message} 当前仍为用户 ${userId}。` : message, true);
+  });
 });
 byId("retry").addEventListener("click", sendPending);
 byId("older").addEventListener("click", () => run(async () => {
@@ -367,24 +571,32 @@ for (const button of document.querySelectorAll("[data-prompt]")) {
 }
 
 async function restoreConversation() {
-  let saved;
-  try { saved = sessionStorage.getItem(storageKey); } catch { return; }
-  if (!uuidPattern.test(saved || "")) return;
-  sessionId = saved;
-  await run(async () => {
+  const saved = readStorage("travel-support-session:" + userId);
+  const latest = sessions[0]?.sessionId;
+  const id = uuidPattern.test(saved || "") ? saved : latest;
+  if (id) {
     try {
-      const history = await api(sessionPath() + "/messages");
-      showHistory(history);
-      await readConfirmation();
+      await openSession(id);
     } catch (error) {
-      if (error.code === "SESSION_NOT_FOUND") {
-        rememberSession(null);
+      if (error.code !== "SESSION_NOT_FOUND") {
+        showError(error.message);
         return;
       }
-      throw error;
+      rememberSession(null);
+      if (latest && latest !== id) await openSession(latest);
     }
-  }, "正在恢复上次对话…");
+  }
 }
 
+previewForm.hidden = !previewMode;
+byId("sessions-status").textContent = previewMode ? "选择用户后查看历史会话。" : "";
+byId("objects-status").textContent = previewMode ? "选择用户并查询后显示卡片。" : "";
+showRecentUsers();
 syncControls();
-restoreConversation();
+const savedUser = readStorage(previewKey);
+if (previewMode && validUserId(savedUser)) {
+  byId("preview-user").value = savedUser;
+  run(() => selectUser(savedUser), "", (message) => showPreviewStatus(message, true));
+} else if (!previewMode) {
+  run(() => selectUser(null), "正在读取客服会话…");
+}

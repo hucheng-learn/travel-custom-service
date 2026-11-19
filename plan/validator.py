@@ -167,11 +167,17 @@ class TurnPlanValidator:
     @staticmethod
     def _text_reference(plan: TurnPlan, flow_id: FlowId, state: DialogueState, text: str) -> OrderReference | None:
         if plan.use_current_order:
-            # 省略订单的入住日期追问只能引用已验证的行程订单，其他查询仍需明确指代。
-            refers_to_order = CURRENT_ORDER_WORDS.search(text) or (flow_id == ITINERARY and is_stay_date_question(text))
-            if plan.order_number is not None or state.current_order_id is None or not refers_to_order:
+            # 省略订单的入住日期追问只能引用已验证的行程订单，其他查询仍需明确指代；
+            # 刚收到的订单卡片（pending_order_id）可以承接紧随的简短回答。
+            refers_to_order = (
+                CURRENT_ORDER_WORDS.search(text)
+                or (flow_id == ITINERARY and is_stay_date_question(text))
+                or state.pending_order_id is not None
+            )
+            order_id = state.pending_order_id if state.pending_order_id is not None else state.current_order_id
+            if plan.order_number is not None or order_id is None or not refers_to_order:
                 raise PlanRejectedError("还不能确定你指的是哪一笔订单，请发订单号或订单卡片。")
-            return OrderReference(kind="order_id", value=str(state.current_order_id))
+            return OrderReference(kind="order_id", value=str(order_id))
         number = plan.order_number
         if number is None:
             return None

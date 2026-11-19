@@ -7,7 +7,7 @@ from integration.llm import InvalidModelOutputError, LlmClient, ModelUnavailable
 from integration.regions import AreaCatalog
 from plan.fixed_order_plan import (
     ITINERARY_QUERY, ORDER_QUERY, explicit_control, explicit_order_itinerary, extract_order_number, fallback_plan,
-    is_stay_date_question,
+    is_stay_date_question, pending_order_intent,
 )
 from plan.models import DATE_ITINERARY, ITINERARY, PRODUCT, TurnPlan
 from plan.product_models import ProductRequest
@@ -46,11 +46,15 @@ class TurnPlanner:
     async def plan(self, text: str, state: DialogueState, *, waiting_for_order: bool) -> TurnPlan:
         if (control := explicit_control(text)) is not None:
             return control
+        if state.pending_order_id is not None and (flow_id := pending_order_intent(text)) is not None:
+            # 回答“已看到订单卡片”的追问：直接用暂存的订单启动对应流程。
+            return TurnPlan(route="task", command="start_flow", flow_id=flow_id, use_current_order=True)
         if is_stay_date_question(text):
             # 有已查到的订单就承接追问；缺订单时也先建立行程任务，让下一轮能接住订单号。
             return TurnPlan(
                 route="task", command="start_flow", flow_id=ITINERARY,
-                use_current_order=state.current_order_id is not None and not waiting_for_order,
+                use_current_order=(state.current_order_id is not None or state.pending_order_id is not None)
+                and not waiting_for_order,
             )
         stage_three = stage_three_plan(text, state, self._areas)
         if stage_three is not None:
@@ -94,7 +98,7 @@ class TurnPlanner:
             "active_flow": state.active_task.flow_id if state.active_task else None,
             "waiting_for_order": waiting_for_order,
             "paused_flows": [task.flow_id for task in state.paused_tasks],
-            "has_current_order": state.current_order_id is not None,
+            "has_current_order": state.current_order_id is not None or state.pending_order_id is not None,
             "missing_slots": state.active_task.missing_slots if state.active_task else None,
             "active_product_kind": self._active_product_kind(state),
         }, ensure_ascii=False)

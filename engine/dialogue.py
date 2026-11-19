@@ -38,6 +38,22 @@ class DialogueEngine:
     async def run(
         self, state: DialogueState, user_id: int, incoming: dict, claim: ReservedTurn | None = None,
     ) -> DialogueResult:
+        card = incoming.get("object", {})
+        order_card_without_task = (
+            incoming["type"] == "object" and card.get("type") == "order" and state.active_task is None
+        )
+        if order_card_without_task:
+            # 没有进行中的查询时先暂存这笔订单，再由校验器给出“查支付还是行程”的澄清。
+            state.pending_order_id = int(card["id"])
+        result = await self._dispatch(state, user_id, incoming, claim)
+        if not (order_card_without_task and result.route == "clarify"):
+            # 暂存的订单只承接紧随的一轮，避免过期的卡片上下文影响后面的对话。
+            state.pending_order_id = None
+        return result
+
+    async def _dispatch(
+        self, state: DialogueState, user_id: int, incoming: dict, claim: ReservedTurn | None = None,
+    ) -> DialogueResult:
         if incoming["type"] == "text" and is_pause_request(incoming["text"]):
             return self._pause_queries(state)
         if incoming["type"] == "text" and has_multiple_requests(incoming["text"]):

@@ -113,6 +113,20 @@ class OperationRepository:
                 raise TicketNotFoundError
             return ticket_view(row, self._next_step)
 
+    async def list_tickets(self, user_id: int, offset: int, limit: int) -> list[dict]:
+        # 侧栏只取当前用户的编号和状态，不传工单描述等内容。
+        query = (
+            select(SupportTicket.id, SupportTicket.ticket_no, SupportTicket.status)
+            .where(SupportTicket.user_id == user_id)
+            .order_by(SupportTicket.id.desc())
+            .offset(offset).limit(limit)
+        )
+        async with self._sessions() as db:
+            return [
+                {"type": "ticket", "id": str(ticket_id), "title": number, "attributes": {"status": status}}
+                for ticket_id, number, status in (await db.execute(query)).tuples()
+            ]
+
     @staticmethod
     async def _check_claim(db: AsyncSession, claim: ReservedTurn) -> None:
         session, turn = await DialogueRepository._read_claim(db, claim)

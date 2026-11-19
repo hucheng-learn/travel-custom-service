@@ -71,6 +71,18 @@ def is_stay_date_question(text: str) -> bool:
     return STAY_DATE_QUESTION.fullmatch(text.strip().rstrip("。！!？?").strip()) is not None
 
 
+def pending_order_intent(text: str) -> FlowId | None:
+    # 只承接“已看到订单卡片”追问的简短回答，长句和其他话题仍走常规规划。
+    normalized = text.strip().rstrip("。！!？?").strip()
+    if not normalized or len(normalized) > 12:
+        return None
+    if ITINERARY_QUERY.search(normalized) or normalized in {"行程", "出行安排"}:
+        return ITINERARY
+    if ORDER_QUERY.search(normalized) or normalized in {"订单", "订单状态", "支付", "付款", "订单支付", "支付状态"}:
+        return ORDER_STATUS
+    return None
+
+
 def explicit_order_itinerary(text: str) -> TurnPlan | None:
     # 简短的查行程指令直接进入订单行程流程，先收集订单号。带日期的查询由日期流程处理。
     request = re.sub(r"^(?:(?:请|帮我|麻烦)\s*)+", "", text.strip()).rstrip("。！!？?").strip()

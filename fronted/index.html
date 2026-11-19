@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f7f6">
   <title>旅伴 · 在线客服</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=3">
-  <script src="/assets/app.js?v=3" defer></script>
+  <link rel="stylesheet" href="/assets/styles.css?v=4">
+  <script src="/assets/app.js?v=4" defer></script>
 </head>
 <body>
   <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -29,17 +29,34 @@
         <span class="brand-name">旅伴</span>
         <span class="brand-section">旅行服务中心</span>
       </div>
-      <button id="new-chat" class="new-chat" type="button">
-        <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>新对话
-      </button>
+      <form id="preview-form" class="preview-form" hidden>
+        <label for="preview-user">用户 ID</label>
+        <input id="preview-user" list="recent-users" inputmode="numeric" pattern="[0-9]{1,19}" maxlength="19"
+               placeholder="输入或选择用户 ID" autocomplete="off" required>
+        <datalist id="recent-users"></datalist>
+        <button id="preview-submit" class="primary" type="submit">查询</button>
+        <p id="preview-status" role="status">请选择用户后开始</p>
+      </form>
     </div>
   </header>
 
   <main class="workspace">
-    <aside class="service-sidebar" aria-labelledby="services-title">
+    <aside class="service-sidebar" aria-label="会话与常用服务">
       <div class="travel-hero">
-        <p class="hero-title">旅途上的事，<br>随时问我</p>
+        <p class="hero-title">旅途上的事，随时问我</p>
       </div>
+
+      <section class="services conversations" aria-labelledby="conversations-title">
+        <div class="panel-heading">
+          <h2 id="conversations-title">历史会话</h2>
+          <button id="new-chat" class="new-chat" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>新对话
+          </button>
+        </div>
+        <p id="sessions-status" class="panel-status" role="status"></p>
+        <div id="sessions-list" class="sessions-list"></div>
+        <button id="more-sessions" class="quiet-button" type="button" hidden>更多会话</button>
+      </section>
 
       <!-- 快捷入口把常见需求填入输入框，旅客可以修改后再发送。 -->
       <section class="services">
@@ -104,6 +121,7 @@
           <h1 id="chat-title">旅行助手</h1>
           <p>智能客服</p>
         </div>
+        <a class="objects-jump" href="#objects-title">查看业务卡片</a>
       </header>
 
       <div class="chat-body">
@@ -141,12 +159,30 @@
         </form>
       </footer>
     </section>
+
+    <aside class="objects" aria-labelledby="objects-title">
+      <div class="panel-heading">
+        <h2 id="objects-title">业务卡片</h2>
+        <button id="refresh-objects" class="quiet-button" type="button">刷新</button>
+      </div>
+      <div class="object-filters" aria-label="卡片分类">
+        <button type="button" data-kind="orders" aria-pressed="true">订单</button>
+        <button type="button" data-kind="products" aria-pressed="false">已订商品</button>
+        <button type="button" data-kind="refunds" aria-pressed="false">退款</button>
+        <button type="button" data-kind="tickets" aria-pressed="false">工单</button>
+      </div>
+      <div class="objects-body">
+        <p id="objects-status" class="panel-status" role="status"></p>
+        <div id="objects-list" class="objects-list"></div>
+        <button id="more-objects" class="quiet-button" type="button" hidden>加载更多</button>
+      </div>
+    </aside>
   </main>
 
   <dialog id="new-chat-dialog" aria-labelledby="new-chat-title">
     <form method="dialog">
       <h2 id="new-chat-title">开始新对话？</h2>
-      <p>开始后将关闭当前对话。</p>
+      <p>已发送的消息会保留在历史会话里，输入框中的草稿会清空。</p>
       <div class="dialog-actions">
         <button type="submit" value="cancel" autofocus>返回</button>
         <button type="submit" value="start" class="primary">开始新对话</button>

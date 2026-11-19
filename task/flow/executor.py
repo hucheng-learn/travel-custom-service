@@ -45,6 +45,8 @@ class DialogueState(BaseModel):
     active_task: FlowTask | None = None
     paused_tasks: list[FlowTask] = Field(default_factory=list)
     current_order_id: int | None = None
+    # 没有进行中任务时收到的订单卡片先暂存，只承接紧随的下一条消息。
+    pending_order_id: int | None = None
 
 
 @dataclass(frozen=True)

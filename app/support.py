@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, Depends, FastAPI, Header, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,6 +14,7 @@ from plan.models import OrderReference
 from repository.dialogue import MessageIdConflictError, SessionNotFoundError, TurnInProgressError
 from repository.operations import TicketNotFoundError
 from service.dialogue import SupportService, UnauthenticatedError, UpstreamUnavailableError
+from service.objects import ObjectKind
 
 
 router = APIRouter(prefix="/api/v1/support", tags=["客服对话"])
@@ -65,22 +66,27 @@ class OrderMessage(IncomingMessage):
     object: Annotated[OrderCard | ConfirmationCard, Field(discriminator="type")]
 
 
-def get_user_id(request: Request, value: Annotated[str | None, Header(alias="X-User-Id")] = None) -> int:
-    # 本机预览只认环回直连。正式环境通过认证网关注入身份，浏览器无需提交用户 ID。
-    if value is None and (preview_user_id := getattr(request.app.state, "preview_user_id", None)) is not None:
-        local_hosts = {"127.0.0.1", "::1", "localhost"}
-        if (
-            request.client and request.client.host in local_hosts and request.url.hostname in local_hosts
-            and not any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers)
-            and request.headers.get("sec-fetch-site") in {None, "same-origin", "none"}
-        ):
-            return preview_user_id
-    # 现有联调客户端可显式传头。对外部署时应由网关替换客户端传入的同名头。
+def get_user_id(
+    request: Request, response: Response, value: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    preview: Annotated[str | None, Header(alias="X-Preview-User-Id")] = None,
+) -> int:
+    # 模拟身份只允许本机同源页面直连，平台网关注入的身份优先。
+    local_hosts = {"127.0.0.1", "::1", "localhost"}
+    if (
+        value is None and preview is not None and request.client and request.client.host in local_hosts
+        and request.url.hostname in local_hosts
+        and request.headers.get("origin") in {None, f"{request.url.scheme}://{request.url.netloc}"}
+        and not any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers)
+        and request.headers.get("sec-fetch-site") in {None, "same-origin", "none"}
+    ):
+        value = preview
     if value is None or len(value) > 19 or not value.isascii() or not value.isdecimal():
         raise UnauthenticatedError
     user_id = int(value)
     if not 0 < user_id < 2**63:
         raise UnauthenticatedError
+    # 同一地址切换身份后会返回不同数据，不能被浏览器或代理复用。
+    response.headers["Cache-Control"] = "private, no-store"
     return user_id
 
 
@@ -94,6 +100,23 @@ def get_support_service(request: Request) -> SupportService:
 type UserId = Annotated[int, Depends(get_user_id)]
 type Service = Annotated[SupportService, Depends(get_support_service)]
 type Message = Annotated[TextMessage | OrderMessage, Body(discriminator="type")]
+type PageNo = Annotated[int, Query(alias="pageNo", ge=1, le=10000)]
+
+
+@router.get("/me")
+async def get_identity(user_id: UserId, service: Service) -> dict:
+    await service.validate_identity(user_id)
+    return {"userId": str(user_id)}
+
+
+@router.get("/sessions")
+async def list_sessions(user_id: UserId, service: Service, page_no: PageNo = 1) -> dict:
+    return await service.list_sessions(user_id, page_no)
+
+
+@router.get("/objects/{kind}")
+async def list_objects(kind: ObjectKind, user_id: UserId, service: Service, page_no: PageNo = 1) -> dict:
+    return await service.list_objects(user_id, kind, page_no)
 
 
 @router.post("/sessions", status_code=201)
