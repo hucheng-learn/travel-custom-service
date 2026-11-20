@@ -11,7 +11,7 @@ from plan.fixed_order_plan import (
 )
 from plan.models import DATE_ITINERARY, ITINERARY, PRODUCT, TurnPlan
 from plan.product_models import ProductRequest
-from plan.travel_plans import hotel_filters, stage_three_plan
+from plan.travel_plans import hotel_filters, local_product_plan
 from task.flow.executor import DialogueState
 
 
@@ -59,14 +59,14 @@ class TurnPlanner:
                 use_current_order=(state.current_order_id is not None or state.pending_order_id is not None)
                 and not waiting_for_order,
             )
-        stage_three = stage_three_plan(text, state, self._areas)
-        if stage_three is not None:
-            # stage_three 是本地规则给出的商品、日期或知识计划，只在条件足够明确时才返回，
+        local_plan = local_product_plan(text, state, self._areas)
+        if local_plan is not None:
+            # local_plan 是本地规则给出的商品、日期或知识计划，只在条件足够明确时才返回，
             # 后面模型不可用时也靠它兜底。
-            if stage_three.route == "knowledge" or stage_three.flow_id == DATE_ITINERARY or stage_three.command == "set_slots":
-                return stage_three
+            if local_plan.route == "knowledge" or local_plan.flow_id == DATE_ITINERARY or local_plan.command == "set_slots":
+                return local_plan
             # product 是原文里提到的商品线索，还没解析成地区 ID 或日期。
-            product = stage_three.product
+            product = local_plan.product
             if product and product.kind == "hotel":
                 # 明确的筛选和完整的房型查询直接用原文，避免模型把筛选条件混入酒店名。
                 # complete_detail 表示城市、酒店名和入住/退房日期四个条件都已经说清。
@@ -78,29 +78,29 @@ class TurnPlanner:
                     state.active_task.flow_id == PRODUCT and state.active_task.missing_slots == ["keyword"]
                 )
                 if hotel_filters(text) or complete_detail or selecting_hotel:
-                    return stage_three
+                    return local_plan
             if product and product.kind == "scenic" and product.area:
                 # 同名地区保留候选供旅客选择，明确的层级地名则保留原文供校验。
                 # 比如“朝阳”既可能是北京朝阳，也可能是辽宁朝阳，不能直接定成一个城市。
                 if self._areas and (len(self._areas.resolve(product.area)) > 1
                                     or any(sep in product.area for sep in ("/", "／", "下的", "下辖"))):
-                    return stage_three
+                    return local_plan
                 if product.detail and product.keyword and product.date_text:
-                    return stage_three
+                    return local_plan
             if product and product.kind == "flight" and all(
                 (product.origin, product.destination, product.date_text, product.keyword)
             ) and not (ORDER_QUERY.search(text) or ITINERARY_QUERY.search(text)):
                 # 四项条件齐全就能查指定航班，避免模型输出异常时丢掉已经识别的条件。
-                return stage_three
-        if stage_three is None and (itinerary := explicit_order_itinerary(text)) is not None:
+                return local_plan
+        if local_plan is None and (itinerary := explicit_order_itinerary(text)) is not None:
             return itinerary
         # number 是这一轮原文里完整出现的订单号；只在任务正等订单号时才走填槽捷径。
-        number = extract_order_number(text) if waiting_for_order and stage_three is None else None
+        number = extract_order_number(text) if waiting_for_order and local_plan is None else None
         if number and any(character.isdigit() for character in number):
             # 明确填槽不用发给模型，也避免模型把订单号当新话题。
             return TurnPlan(route="task", command="set_slots", order_number=number)
         if self._llm is None:
-            return stage_three or fallback_plan(text, waiting_for_order=waiting_for_order)
+            return local_plan or fallback_plan(text, waiting_for_order=waiting_for_order)
 
         # 本地规则识别不了才调用模型；只传文字、任务类型和是否有可引用的订单，
         # 不传用户 ID、订单详情或历史记录。
@@ -124,14 +124,14 @@ class TurnPlanner:
         except ModelUnavailableError as error:
             # 模型不可用：回退本地规则，流程不中断。
             logger.warning("%s，改用本地对话规则", error)
-            return stage_three or fallback_plan(text, waiting_for_order=waiting_for_order)
+            return local_plan or fallback_plan(text, waiting_for_order=waiting_for_order)
         except (InvalidModelOutputError, ValidationError):
             # 输出不合法就转为澄清，不会执行任何查询。
             logger.warning("模型输出未通过结构校验")
             planned = TurnPlan(route="clarify")
         # 模型无法提供可用计划时，已识别的商品查询仍可交给校验器检查原文条件。
-        if planned.route == "clarify" and stage_three and stage_three.flow_id == PRODUCT:
-            return stage_three
+        if planned.route == "clarify" and local_plan and local_plan.flow_id == PRODUCT:
+            return local_plan
         return planned
 
     @staticmethod

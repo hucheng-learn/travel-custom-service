@@ -52,15 +52,15 @@ def has_multiple_requests(text: str) -> bool:
     empty = DialogueState()
     matches = 0
     for part in parts:
-        plan = stage_three_plan(part, empty, None) or fallback_plan(part, waiting_for_order=False)
+        plan = local_product_plan(part, empty, None) or fallback_plan(part, waiting_for_order=False)
         if plan.route == "knowledge" or plan.command == "start_flow":
             matches += 1
             if matches == 2:
                 return True
     return False
 
-
-def stage_three_plan(text: str, state: DialogueState, areas: AreaCatalog | None) -> TurnPlan | None:
+# 本地规则生成计划
+def local_product_plan(text: str, state: DialogueState, areas: AreaCatalog | None) -> TurnPlan | None:
     active = state.active_task
     dates = find_date_texts(text)
     locations = areas.mentions(text) if areas else []
