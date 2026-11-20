@@ -15,8 +15,13 @@ STAY_DATE_QUESTION = re.compile(
     r"(?:具体)?(?:是)?(?:哪一天|哪天|什么时候)(?:入住|退房|离店)(?:的)?"
     r"|(?:入住|退房|离店)(?:日期|时间)?(?:具体)?(?:是)?(?:哪一天|哪天|什么时候)"
 )
+# 控制指令动词表：前置识别与模型计划校验共用，避免两处词表不一致。
+CANCEL_WORDS = ("取消", "结束", "停止")
+RESUME_WORDS = ("继续", "恢复", "接着", "回到")
+# 模型给出恢复类计划时，原文至少要出现一个恢复动词作为旁证。
+RESUME_VERBS = re.compile("|".join(RESUME_WORDS))
 CONTROL = re.compile(
-    r"(?:请\s*|帮我\s*)?(取消|结束|停止|继续|恢复|接着|回到)\s*"
+    r"(?:请\s*|帮我\s*)?(" + "|".join(CANCEL_WORDS + RESUME_WORDS) + r")\s*"
     r"(?:(?:这次|这个|当前|刚才|之前|上一个|上次|原来)的?)?\s*"
     r"(?:(客服任务|任务|查询|查订单|订单查询|查行程|行程查询|出行安排|退款申请|客服工单|工单)\s*)?"
     r"([0-9a-fA-F-]{36})?[。！!，,\s]*"
@@ -40,7 +45,7 @@ def explicit_control(text: str) -> TurnPlan | None:
     if not match:
         return None
     verb, target, raw_id = match.groups()
-    if verb in {"取消", "结束", "停止"} and target is None and raw_id is None:
+    if verb in CANCEL_WORDS and target is None and raw_id is None:
         return None
     flow_id: FlowId | None = None
     if target in {"查订单", "订单查询"}:
@@ -55,7 +60,7 @@ def explicit_control(text: str) -> TurnPlan | None:
         task_id = UUID(raw_id) if raw_id else None
     except ValueError:
         return TurnPlan(route="clarify")
-    command = "cancel_task" if verb in {"取消", "结束", "停止"} else "resume_task"
+    command = "cancel_task" if verb in CANCEL_WORDS else "resume_task"
     # “取消订单”不匹配控制语法；该接口绝不取消中台订单。
     return TurnPlan(route="task", command=command, flow_id=flow_id, task_id=task_id)
 

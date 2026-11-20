@@ -26,11 +26,26 @@ class TurnInProgressError(RuntimeError):
 
 @dataclass(frozen=True)
 class ReservedTurn:
+    """预留的对话轮次。"""
+
+    # session_id 是会话主键，turn_id 是本轮在 support_turn 表里的记录。
     session_id: UUID
     turn_id: UUID
+    # token 是这次预留的随机凭据；处理超时被别人接管后，旧执行者的 token 会失效。
     token: UUID
+    # version 是预留时读到的会话版本号，写回时用它判断快照有没有被别人改过。
     version: int
+    # snapshot 是预留时读到的会话状态，引擎会在这份快照基础上继续处理。
     snapshot: dict
+
+
+@dataclass(frozen=True)
+class ReserveResult:
+    """轮次预留结果：新轮次凭据或已完成轮次的回放响应。"""
+
+    # 二选一：新预留成功时用 claim；重复消息命中已完成轮次时用 replay。
+    claim: ReservedTurn | None = None
+    replay: dict | None = None
 
 
 def utc_now() -> datetime:
@@ -43,6 +58,7 @@ class DialogueRepository:
         self._sessions = sessions
 
     async def create(self, user_id: int, snapshot: dict) -> SupportSession:
+        # row 是新会话记录，version 从 0 开始，state_json 存初始的 DialogueState。
         now = utc_now()
         row = SupportSession(
             id=uuid4(), user_id=user_id, state_json=snapshot, version=0, created_at=now, updated_at=now
@@ -88,10 +104,11 @@ class DialogueRepository:
 
     async def reserve(
         self, session_id: UUID, user_id: int, message_id: UUID, request_hash: str, input_data: dict
-    ) -> ReservedTurn | dict:
+    ) -> ReserveResult:
         # 锁会话只为预留轮次，提交后再查中台，不在数据库事务里等待网络。
         async with self._sessions.begin() as db:
             session = await self._owned(db, session_id, user_id, lock=True)
+            # turn 是同一个 messageId 的历史记录，用来识别重复发送和内容冲突。
             turn = await db.scalar(select(SupportTurn).where(
                 SupportTurn.session_id == session_id, SupportTurn.message_id == message_id
             ))
@@ -99,9 +116,10 @@ class DialogueRepository:
                 if turn.request_hash != request_hash:
                     raise MessageIdConflictError
                 if turn.status == "completed" and turn.response_json is not None:
-                    return turn.response_json
+                    return ReserveResult(replay=turn.response_json)
 
             now = utc_now()
+            # processing_turn_id 是当前正在处理的那一轮，超时后允许新请求接管。
             if session.processing_turn_id is not None:
                 if session.processing_deadline is not None and session.processing_deadline > now:
                     raise TurnInProgressError
@@ -111,6 +129,7 @@ class DialogueRepository:
                     expired.error_code = "TURN_EXPIRED"
                     expired.updated_at = now
 
+            # latest 是会话当前最大的轮次序号，新轮次排在它后面。
             latest = await db.scalar(select(func.max(SupportTurn.seq)).where(SupportTurn.session_id == session_id)) or 0
             if turn is None:
                 turn = SupportTurn(
@@ -125,14 +144,16 @@ class DialogueRepository:
             turn.error_code = None
             turn.updated_at = now
 
+            # token 是这一次预留的随机凭据，和轮次 ID 一起写进会话，后续写回要同时匹配。
             token = uuid4()
             session.processing_turn_id = turn.id
             session.processing_token = token
             session.processing_deadline = now + TURN_LEASE
-            return ReservedTurn(session_id, turn.id, token, session.version, session.state_json)
+            return ReserveResult(claim=ReservedTurn(session_id, turn.id, token, session.version, session.state_json))
 
     async def finish(self, claim: ReservedTurn, snapshot: dict, response: dict) -> None:
         async with self._sessions.begin() as db:
+            # session 和 turn 只有在本轮凭据仍然有效时才会返回；否则说明已被接管。
             session, turn = await self._read_claim(db, claim)
             if session is None or turn is None:
                 raise TurnInProgressError

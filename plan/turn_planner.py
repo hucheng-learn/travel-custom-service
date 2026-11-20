@@ -44,6 +44,9 @@ class TurnPlanner:
         self._areas = areas
 
     async def plan(self, text: str, state: DialogueState, *, waiting_for_order: bool) -> TurnPlan:
+        # text 是本轮用户原文；state 提供活动任务、暂停栈和订单线索；
+        # waiting_for_order 表示当前任务正停在订单号槽位上，这句话可以优先按填槽处理。
+        # 先试本地规则：控制指令、对订单卡片的追问、入住日期追问都不需要模型。
         if (control := explicit_control(text)) is not None:
             return control
         if state.pending_order_id is not None and (flow_id := pending_order_intent(text)) is not None:
@@ -58,14 +61,19 @@ class TurnPlanner:
             )
         stage_three = stage_three_plan(text, state, self._areas)
         if stage_three is not None:
+            # stage_three 是本地规则给出的商品、日期或知识计划，只在条件足够明确时才返回，
+            # 后面模型不可用时也靠它兜底。
             if stage_three.route == "knowledge" or stage_three.flow_id == DATE_ITINERARY or stage_three.command == "set_slots":
                 return stage_three
+            # product 是原文里提到的商品线索，还没解析成地区 ID 或日期。
             product = stage_three.product
             if product and product.kind == "hotel":
                 # 明确的筛选和完整的房型查询直接用原文，避免模型把筛选条件混入酒店名。
+                # complete_detail 表示城市、酒店名和入住/退房日期四个条件都已经说清。
                 complete_detail = product.detail and all(
                     (product.area, product.keyword, product.date_text, product.end_date_text)
                 )
+                # selecting_hotel 表示当前商品任务只差酒店名，这句就是在选酒店，不能被模型扩写成新查询。
                 selecting_hotel = product.keyword and state.active_task is not None and (
                     state.active_task.flow_id == PRODUCT and state.active_task.missing_slots == ["keyword"]
                 )
@@ -73,6 +81,7 @@ class TurnPlanner:
                     return stage_three
             if product and product.kind == "scenic" and product.area:
                 # 同名地区保留候选供旅客选择，明确的层级地名则保留原文供校验。
+                # 比如“朝阳”既可能是北京朝阳，也可能是辽宁朝阳，不能直接定成一个城市。
                 if self._areas and (len(self._areas.resolve(product.area)) > 1
                                     or any(sep in product.area for sep in ("/", "／", "下的", "下辖"))):
                     return stage_three
@@ -85,6 +94,7 @@ class TurnPlanner:
                 return stage_three
         if stage_three is None and (itinerary := explicit_order_itinerary(text)) is not None:
             return itinerary
+        # number 是这一轮原文里完整出现的订单号；只在任务正等订单号时才走填槽捷径。
         number = extract_order_number(text) if waiting_for_order and stage_three is None else None
         if number and any(character.isdigit() for character in number):
             # 明确填槽不用发给模型，也避免模型把订单号当新话题。
@@ -92,7 +102,12 @@ class TurnPlanner:
         if self._llm is None:
             return stage_three or fallback_plan(text, waiting_for_order=waiting_for_order)
 
-        # 只传文字、任务类型和是否有可引用的订单，不传用户 ID、订单详情或历史记录。
+        # 本地规则识别不了才调用模型；只传文字、任务类型和是否有可引用的订单，
+        # 不传用户 ID、订单详情或历史记录。
+        # context 里的字段都是规划用的最小信息：user_text 本轮原文，active_flow 活动流程，
+        # waiting_for_order 是否在等订单号，paused_flows 暂停栈里的流程，
+        # has_current_order 有没有可引用的订单，missing_slots 当前还缺哪些槽位，
+        # active_product_kind 当前商品品类。
         context = json.dumps({
             "user_text": text,
             "active_flow": state.active_task.flow_id if state.active_task else None,
@@ -103,12 +118,15 @@ class TurnPlanner:
             "active_product_kind": self._active_product_kind(state),
         }, ensure_ascii=False)
         try:
+            # raw_plan 是模型返回的 JSON 文本，planned 是解析后的计划对象。
             raw_plan = await self._llm.propose(SYSTEM_PROMPT, context)
             planned = TurnPlan.model_validate_json(raw_plan)
         except ModelUnavailableError as error:
+            # 模型不可用：回退本地规则，流程不中断。
             logger.warning("%s，改用本地对话规则", error)
             return stage_three or fallback_plan(text, waiting_for_order=waiting_for_order)
         except (InvalidModelOutputError, ValidationError):
+            # 输出不合法就转为澄清，不会执行任何查询。
             logger.warning("模型输出未通过结构校验")
             planned = TurnPlan(route="clarify")
         # 模型无法提供可用计划时，已识别的商品查询仍可交给校验器检查原文条件。
@@ -120,6 +138,7 @@ class TurnPlanner:
     def _active_product_kind(state: DialogueState) -> str | None:
         # 只提示当前商品品类，不把已收集的具体地点、日期或订单线索重复发送。
         if state.active_task is not None:
+            # product 是商品任务 product_request 槽位里保存的请求对象，kind 表示酒店、机票等品类。
             product = state.active_task.slots.get("product_request")
             if isinstance(product, ProductRequest):
                 return product.kind

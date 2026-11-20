@@ -165,13 +165,14 @@ async def stream_message(
     input_data = body.model_dump(mode="json", exclude={"message_id"})
     trace_id = trace_for(request)
     # 开流前先确认身份、归属和幂等冲突；这类错误仍正常返回 HTTP 状态码。
-    claim = await service.reserve_message(session_id, user_id, body.message_id, input_data)
-    if isinstance(claim, dict):
-        turn_id = claim["turnId"]
-        response = claim
+    reserve_result = await service.reserve_message(session_id, user_id, body.message_id, input_data)
+    if reserve_result.replay is not None:
+        turn_id = reserve_result.replay["turnId"]
+        response = reserve_result.replay
     else:
-        turn_id = str(claim.turn_id)
-        response = service.start_reserved(claim, user_id, body.message_id, input_data, trace_id)
+        assert reserve_result.claim is not None
+        turn_id = str(reserve_result.claim.turn_id)
+        response = service.start_reserved(reserve_result.claim, user_id, body.message_id, input_data, trace_id)
     accepted = {"sessionId": str(session_id), "messageId": str(body.message_id), "turnId": turn_id}
     return StreamingResponse(_stream_turn(accepted, response, trace_id), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})

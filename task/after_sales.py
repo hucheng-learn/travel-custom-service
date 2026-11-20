@@ -26,6 +26,7 @@ REFUND_STATUS = re.compile(r"^(?:(?:帮我)?(?:查|查询|查看)(?:一下)?退�
 TEXT_CONFIRM = {"确认", "确认提交", "确认退款", "确认创建工单"}
 TEXT_REJECT = {"不提交", "拒绝", "放弃提交"}
 TICKET_TYPES = {"投诉": "complaint", "售后": "after_sales", "退款咨询": "refund"}
+# 每种售后流程必须收集的字段，顺序决定追问顺序；后面补资料和预览都按这份清单判断是否收集完整。
 REQUIRED = {
     REFUND: ("order", "item", "refund_type", "amount", "reason"),
     TICKET: ("ticket_type", "order", "description"),
@@ -74,9 +75,11 @@ class AfterSales:
         return flow_id in self._prompts
 
     def can_resume(self, task: FlowTask) -> bool:
+        # 版本号对不上说明售后配置改过，旧任务不能按新提示继续收集。
         return task.sales is not None and task.flow_version == self._versions.get(task.flow_id)
 
     def start(self, flow_id: FlowId) -> FlowResult:
+        # 新任务从这份流程的第一个必填字段开始，sales 草稿是空的。
         task = FlowTask(flow_id=flow_id, flow_version=self._versions[flow_id], step_id="start", sales=SalesDraft())
         return self._ask(task, REQUIRED[flow_id][0])
 
@@ -89,6 +92,8 @@ class AfterSales:
         return self._ask(task, task.step_id)
 
     async def process(self, user_id: int, task: FlowTask, incoming: dict, claim: ReservedTurn) -> FlowResult:
+        # draft 是任务收集到现在的售后资料；object_data 来自确认卡或订单卡片；
+        # text 是去掉句末标点后的用户原文；claim 用来给写操作做幂等和归属校验。
         draft = task.sales
         if draft is None:
             raise RuntimeError("售后任务缺少草稿")
@@ -96,7 +101,9 @@ class AfterSales:
         text = incoming.get("text", "").strip().rstrip("。！!")
         try:
             async with asyncio.timeout(22):
+                # 确认卡、文本确认或拒绝、确认前修改，其余情况按当前步骤继续收集。
                 if object_data.get("type") == "confirmation":
+                    # 用户点了确认卡，进入 _confirm 执行真正的提交。
                     return await self._confirm(user_id, task, UUID(object_data["id"]), object_data["decision"], claim)
                 if text in TEXT_CONFIRM | TEXT_REJECT:
                     if draft.confirmation is None:
@@ -105,7 +112,9 @@ class AfterSales:
                         user_id, task, draft.confirmation.id, "reject" if text in TEXT_REJECT else "confirm", claim
                     )
                 if task.step_id in {"confirm", "review"}:
+                    # 确认前改金额、原因或订单，旧确认卡随之失效。
                     return await self._change_or_review(user_id, task, text, object_data)
+                # 按当前步骤收集订单、明细、退款类型、金额或原因等。
                 return await self._collect(user_id, task, text, object_data)
         except SalesInputError as error:
             return FlowResult(task, [text_reply(str(error))])
@@ -128,6 +137,7 @@ class AfterSales:
         return self._receipt(previous)
 
     async def status(self, user_id: int, claim: ReservedTurn, search: str) -> list[dict]:
+        # search 是“查退款进度”后面附带的申请编号、订单号，空字符串表示查最近的申请。
         if self._refunds is None or self._travel is None:
             return [text_reply("暂时无法查询退款进度，请稍后再试。")]
         try:
@@ -169,6 +179,7 @@ class AfterSales:
         return [text_reply("暂时无法核对退款进度，请稍后重试。")]
 
     async def _collect(self, user_id: int, task: FlowTask, text: str, obj: dict) -> FlowResult:
+        # draft 是售后草稿，step 是当前要收集的字段，text/obj 是本轮回答。
         draft = task.sales
         step = task.step_id
         if obj and not (step == "order" and obj.get("type") == "order"):
@@ -177,6 +188,7 @@ class AfterSales:
             if task.flow_id == TICKET and text in {"无订单", "不关联订单"}:
                 draft.no_order = True
             elif (reference := self._order_reference(text, obj)) is not None:
+                # reference 是从原文或订单卡片识别出的订单引用，还要再查一次确认是本人的订单。
                 order = await self._owned_order(user_id, reference)
                 draft.order_id = _positive_id(order.get("orderId"))
                 draft.order_no = order.get("orderNo")
@@ -266,6 +278,9 @@ class AfterSales:
         return FlowResult(task, [text_reply("请用确认卡提交或不提交。若要修改，先发「修改金额」「修改描述」或「修改订单」。")])
 
     async def _preview(self, user_id: int, task: FlowTask) -> FlowResult:
+        # 生成服务端确认卡（5 分钟内有效），此时还没有产生任何写操作。
+        # draft 是已收集完整的售后草稿；target 是最终要提交给中台的字段快照；
+        # details 是给用户核对的摘要。
         draft = task.sales
         draft.confirmation = None
         task.step_id = "review"
@@ -273,6 +288,8 @@ class AfterSales:
         if task.flow_id == REFUND:
             if self._refunds is None:
                 raise SalesInputError("暂时无法核对退款信息，请稍后再试。")
+            # 预检订单状态、进行中申请和剩余可退金额。
+            # item 是选中的订单明细，remaining 是这条明细当前还能退的金额。
             item, remaining, _ = await self._refunds.preflight(user_id, draft.order_id, draft.item_id)
             amount = remaining if draft.refund_type == "full" else money(draft.amount)
             if not 0 < amount <= remaining:
@@ -300,6 +317,7 @@ class AfterSales:
     async def _confirm(
         self, user_id: int, task: FlowTask, confirmation_id: UUID, decision: str, claim: ReservedTurn,
     ) -> FlowResult:
+        # draft 是售后草稿，card 是当前唯一有效的确认卡，operation 是落库的写操作记录。
         draft = task.sales
         card = draft.confirmation
         if task.step_id != "confirm" or card is None or card.id != confirmation_id:
@@ -315,6 +333,7 @@ class AfterSales:
                 # 提交功能关闭时，明确告知这次没有产生退款申请。
                 return FlowResult(task, [text_reply("当前无法在这里提交退款申请。这次申请未提交。")])
             try:
+                # 先落写操作记录再发中台请求，防重逻辑在 Refunds.submit 里。
                 operation = await self._refunds.submit(claim, user_id, task.task_id, card.id, card.target)
             except SalesInputError as error:
                 draft.confirmation = None
@@ -323,6 +342,7 @@ class AfterSales:
         else:
             if card.target["orderId"] is not None:
                 await self._owned_order(user_id, OrderReference(kind="order_id", value=str(card.target["orderId"])))
+            # 工单和创建事件在同一事务里写入；重复确认按确认 ID 回放原工单，不会重复建单。
             operation = await self._operations.create_ticket(claim, user_id, task.task_id, card.id, card.target)
         return self._receipt(operation)
 
@@ -354,6 +374,7 @@ class AfterSales:
         return FlowResult(None, [text_reply("退款提交结果待核对，系统不会重复提交。请发送「查退款进度」。")])
 
     def _ask(self, task: FlowTask, field: str, extra: str = "") -> FlowResult:
+        # field 既是接下来要收集的字段名，也是售后配置里提示词的键。
         task.step_id = field
         task.missing_slots = [field] if field in self._prompts[task.flow_id] else []
         prompt = self._prompts[task.flow_id].get(field, "请回复「重新确认」或使用当前确认卡。")
@@ -367,6 +388,8 @@ class AfterSales:
         return OrderReference(kind="order_no", value=number) if number else None
 
     async def _owned_order(self, user_id: int, reference: OrderReference | None) -> dict:
+        # reference 可能是订单卡片里的主键，也可能是用户输入的订单号；
+        # 订单号要翻页找到对应订单，再统一用主键查详情并校验归属。
         if self._travel is None or reference is None:
             raise SalesInputError("暂不能定位订单，请提供有效的本人订单号。")
         if reference.kind == "order_id":

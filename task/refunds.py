@@ -61,6 +61,7 @@ class Refunds:
         self._zone = zone
 
     async def requests(self, user_id: int, requested_from: str | None = None) -> tuple[list[dict], bool]:
+        # rows 汇总多页申请；total 是中台返回的总数；complete 表示是否已经翻到最后一页。
         rows = []
         for page_no in range(1, MAX_PAGES + 1):
             page = await self._travel.list_refund_requests(
@@ -75,6 +76,7 @@ class Refunds:
         return rows, False
 
     async def preflight(self, user_id: int, order_id: int, item_id: int) -> tuple[dict, Decimal, set[int]]:
+        # 三个请求并发：订单详情、订单退款记录、本人退款申请列表。
         order, refunds, requests = await asyncio.gather(
             self._travel.get_order(user_id, order_id),
             self._travel.list_order_refund_records(user_id, order_id),
@@ -84,15 +86,19 @@ class Refunds:
             order.get("userId") is not None and _positive_id(order["userId"]) != user_id
         ):
             raise SalesInputError("未找到本人的订单。")
+        # item 是要退款的订单明细，状态必须是已支付、已出票或已完成。
         item = next((row for row in read_items(order, "items") if _positive_id(row.get("orderItemId")) == item_id), None)
         if item is None or item.get("statusCode") not in {"paid", "ticketed", "completed"}:
             raise SalesInputError("这条明细不存在或当前状态不支持申请退款。")
+        # previous 是已查到的退款申请，complete 表示列表是否完整；不完整时不能判断有没有重复申请。
         previous, complete = requests
         if not complete:
             raise SalesInputError("暂时无法核对已有退款记录，这次申请未提交。请先到订单页查看退款进度。")
+        # selected 是这条明细已有的退款申请，有 pending/approved 时不能重复提交。
         selected = [row for row in previous if _positive_id(row.get("orderItemId")) == item_id]
         if any(row.get("statusCode") in {"pending", "approved"} for row in selected):
             raise SalesInputError("这条明细已有进行中的退款申请，不能重复提交。")
+        # already_refunded 是这条明细历史成功退款的总额，remaining 是还能申请的金额。
         already_refunded = sum(
             (money(row.get("amount")) for row in read_items(refunds, "list")
              if row.get("statusCode") == "success" and _positive_id(row.get("orderItemId")) == item_id),
@@ -106,18 +112,25 @@ class Refunds:
     async def submit(
         self, claim: ReservedTurn, user_id: int, task_id: UUID, confirmation_id: UUID, target: dict,
     ) -> SupportOperation:
+        # 中台没有跨系统幂等键，这里用操作记录保证同一笔退款只提交一次。
         order_id, item_id = int(target["orderId"]), int(target["itemId"])
+        # uncertain 是同订单同明细之前没确认结果的写操作，存在时先核对，不再重复提交。
         uncertain = await self._operations.latest_uncertain(claim.session_id, order_id=order_id, item_id=item_id)
         if uncertain is not None:
             # 之前的写操作还不确定，不能换一个确认号再发一次。
             return await self.reconcile(user_id, uncertain)
+        # 提交前重新预检：确认之后金额和进行中申请可能已变化。
+        # remaining 是当前剩余可退金额，baseline 是提交前已存在的退款申请 ID 集合。
         _, remaining, baseline = await self.preflight(user_id, order_id, item_id)
         amount = money(target["amount"])
         if not 0 < amount <= remaining or (target["refundType"] == "full" and amount != remaining):
             raise SalesInputError("可申请金额有变化，请重新确认退款金额。")
 
+        # 第一步：落 pending 操作记录，(session_id, confirmation_id) 唯一，重复确认直接复用旧记录。
         row = await self._operations.prepare_refund(claim, task_id, confirmation_id, target)
+        # sending_target 补上发送时间和提交前的申请基线，后续核对超时结果时要用。
         sending_target = {**target, "sentAt": datetime.now(UTC).isoformat(), "baseline": sorted(baseline)}
+        # 第二步：条件更新抢占发送权，只有赢得 pending → sending 的执行者能发中台 POST。
         if not await self._operations.mark_sending(claim, row.id, sending_target):
             existing = await self._operations.find(claim.session_id, confirmation_id)
             return await self.reconcile(user_id, existing or row)
@@ -128,12 +141,15 @@ class Refunds:
                 raise ValueError("退款回执目标与提交目标不一致")
         except TravelHTTPError as error:
             if error.status_code in {400, 401, 403, 404, 422}:
+                # 中台明确拒绝：落 rejected 终态，不再重试。
                 return await self._operations.complete_refund(
                     row.id, "rejected", {"note": "退款申请未能提交，请核对订单是否符合退款条件。"}
                 )
+            # 超时或结果不明：先标 unknown，再按中台现有申请核对。
             return await self._mark_unknown(user_id, row.id)
         except (TravelClientError, ValueError):
             return await self._mark_unknown(user_id, row.id)
+        # 创建成功：落 succeeded 终态并保存回执。
         saved = await self._operations.complete_refund(row.id, "succeeded", receipt)
         logger.info("refund_operation operation_id=%s status=%s", row.id, saved.status)
         return saved
@@ -144,20 +160,25 @@ class Refunds:
         return await self.reconcile(user_id, row)
 
     async def reconcile(self, user_id: int, row: SupportOperation) -> SupportOperation:
+        # 核对处于 sending/unknown 的写操作，绝不重发请求。
         if row.status not in {"sending", "unknown"}:
             return row
+        # target 是提交时保存的订单、明细、金额和申请基线。
         target = row.target_json
         # 只核对发送时点之后的新申请；时间、金额、明细之一对不上就不认领。
         try:
+            # sent 是发起提交的时间；from_local 往前留 3 秒，换算成中台用的业务时区再做过滤。
             sent = datetime.fromisoformat(target["sentAt"])
             from_local = (sent - timedelta(seconds=3)).astimezone(self._zone).strftime("%Y-%m-%d %H:%M:%S")
             async with asyncio.timeout(5):
                 rows, complete = await self.requests(user_id, from_local)
+            # candidates 按退款申请 ID 收集可能是本次提交产生的回执。
             candidates = {}
             for item in rows:
                 if str(item.get("orderId")) != str(target["orderId"]) or str(item.get("orderItemId")) != str(target["itemId"]):
                     continue
                 receipt = refund_receipt(item)
+                # stamp 是这条申请的提交时间，没有时区时按业务时区补上再比较。
                 stamp = datetime.fromisoformat(item["requestedAt"])
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=self._zone)
