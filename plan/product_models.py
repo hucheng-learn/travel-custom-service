@@ -20,10 +20,11 @@ class ProductClues(BaseModel):
     area: str | None = Field(None, max_length=80)
     origin: str | None = Field(None, max_length=80)
     destination: str | None = Field(None, max_length=80)
-    date_text: str | None = Field(None, max_length=20)
-    end_date_text: str | None = Field(None, max_length=20)
-    date_value: date | None = None
-    end_date_value: date | None = None
+    date_text: str | None = Field(None, max_length=20,
+                                 description="商品出行或入住日期的本轮原文；补商品日期也必须使用 product.date_text。")
+    end_date_text: str | None = Field(None, max_length=20, description="酒店退房日期的本轮原文。")
+    date_value: date | None = Field(None, description="商品出行或入住日期的 ISO 值，须同时提供 date_text。")
+    end_date_value: date | None = Field(None, description="酒店退房日期的 ISO 值，须同时提供 end_date_text。")
     keyword: str | None = Field(None, max_length=80)
     hotel_star_rating: Literal["3", "4", "5"] | None = None
     hotel_star_text: str | None = Field(None, max_length=40)

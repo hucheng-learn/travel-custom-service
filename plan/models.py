@@ -83,9 +83,12 @@ class TurnPlan(BaseModel):
     order_number: str | None = Field(default=None, max_length=64)
     task_id: UUID | None = None
     use_current_order: bool = False
-    date_text: str | None = Field(default=None, max_length=20)
-    date_value: date | None = None
-    product: ProductClues | None = None
+    date_text: str | None = Field(default=None, max_length=20,
+                                  description="仅用于 itinerary_date_query 查已有订单行程的日期原文；商品查询用 product.date_text。")
+    date_value: date | None = Field(default=None,
+                                   description="仅用于 itinerary_date_query 的 ISO 日期；商品查询用 product.date_value。")
+    product: ProductClues | None = Field(default=None,
+                                        description="商品查询条件；景点、酒店和交通日期均放在此对象内，补日期时沿用已保存的地区和品类。")
     sales: SalesClues | None = None
     clear_field: Literal["order", "item", "refund_type", "amount", "reason", "ticket_type", "description"] | None = None
     intent_text: str | None = Field(None, max_length=500)

@@ -129,12 +129,38 @@ class TurnPlanValidator:
                 return CheckedTurn("task", plan.command, task=task, sales_changes=changes, clear_field=plan.clear_field)
             if plan.sales or plan.clear_field:
                 raise PlanRejectedError("查询任务不接受售后字段。")
+            plan = self._correct_product_date(plan, task, text)
             reference = self._reference_for(plan, task.flow_id, state, text, task)
             if reference is None:
                 raise PlanRejectedError(self._executor.resume_prompt(task) or "请补充查询条件。")
             self._check_slot(task, reference, allow_update=plan.command == "update_slots")
             return CheckedTurn("task", plan.command, task=task, reference=reference)
         raise PlanRejectedError("没有识别出可执行的命令，请再说具体一点。")
+
+    def _correct_product_date(self, plan: TurnPlan, task: FlowTask, text: str) -> TurnPlan:
+        # 只纠正“正在等商品日期、用户整句只给日期”的字段错放；不猜测意图、不接管任务切换。
+        # 返回计划副本，失败时保留原任务；日期仍须经过原文、换算及商品条件的正常校验。
+        saved = task.slots.get("product_request")
+        if (plan.command != "set_slots" or task.flow_id != PRODUCT or task.sales is not None
+                or task.missing_slots != ["business_date"] or not isinstance(saved, ProductRequest)
+                or saved.business_date is not None or not plan.date_text or plan.date_text != text.strip()
+                or plan.order_number is not None or plan.use_current_order or plan.intent_text is not None):
+            return plan
+        clues = plan.product or ProductClues()
+        if clues.model_dump(exclude_none=True, exclude_defaults=True).keys() - {"date_text", "date_value"}:
+            return plan
+        # 兼容范围只包含可独立识别的日期，不能把“查明天的行程”等句子当成单纯补日期。
+        try:
+            parse_date_text(plan.date_text, calendar_today(self._zone))
+        except (ValueError, OverflowError):
+            return plan
+        parsed = self._parse_date(plan.date_text, text, plan.date_value)
+        if clues.date_value is not None and clues.date_text is None:
+            raise PlanRejectedError("没能识别这次的出行日期，请再提供一次，例如“明天”或“2026-12-01”。")
+        if clues.date_text is not None and self._parse_date(clues.date_text, text, clues.date_value) != parsed:
+            raise PlanRejectedError("这次提供了不同的出行日期，请确认具体哪一天。")
+        corrected = clues.model_copy(update={"date_text": plan.date_text, "date_value": parsed})
+        return plan.model_copy(update={"date_text": None, "date_value": None, "product": corrected})
 
     def _supported(self, flow_id):
         return self._executor.has_flow(flow_id) or bool(self._sales and self._sales.supports(flow_id))
@@ -231,8 +257,12 @@ class TurnPlanValidator:
                 raise PlanRejectedError("归一化日期缺少原文依据。")
             return DateRequest(travel_date=self._parse_date(plan.date_text, text, plan.date_value)) if plan.date_text else None
         if flow_id == PRODUCT:
-            if plan.order_number is not None or plan.use_current_order or plan.date_text or plan.date_value:
-                raise PlanRejectedError("商品咨询请使用商品条件。")
+            if plan.order_number is not None or plan.use_current_order:
+                raise PlanRejectedError("查景点、酒店等商品请提供地区和日期；如果要查已有订单，请说明要查订单还是行程。")
+            if plan.date_text or plan.date_value:
+                saved = task.slots.get("product_request") if task else None
+                label = "入住" if isinstance(saved, ProductRequest) and saved.kind == "hotel" else "出行"
+                raise PlanRejectedError(f"没能识别这次的{label}日期，请再提供一次，例如“明天”或“2026-12-01”。")
             previous = task.slots.get("product_request") if task else None
             return self._merge_product(plan.product, text, previous if isinstance(previous, ProductRequest) else None) if plan.product else None
         if plan.product or plan.date_text or plan.date_value:

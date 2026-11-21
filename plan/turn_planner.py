@@ -38,6 +38,12 @@ set_slots/start_flow 可带多个明确条件；update_slots 修改订单后旧�
 product 中 hotel_star_rating 为3/4/5并附 hotel_star_text；hotel_type 为luxury/business/resort/boutique并附
 hotel_type_text。筛选词不得塞进酒店 keyword。detail/quote 仅在需要详情或报价时为true。
 日期须附原文 date_text/end_date_text；可用业务今日与时区换算 date_value/end_date_value（ISO日期）。
+外层 date_text/date_value 仅供 itinerary_date_query 查询已有订单行程使用。
+景点、酒店、交通等商品的日期必须放 product.date_text/product.date_value；退房日期用 product.end_date_text/end_date_value。
+当前 product_query 缺 business_date，用户只答“明天”时，输出
+{"route":"task","command":"set_slots","product":{"date_text":"明天"}}。
+补日期时沿用摘要内已保存的地区和品类，不把旧地区复制为本轮提取结果。
+用户明确改查“明天的行程”时，应 start_flow 到 itinerary_date_query，不能继续补商品日期。
 例如“下个礼拜二”保留原文并换算日期，不能把“下个月”这种不唯一的日期擅自定为某一天。
 refund_lookup 只选 order_number/request_id/request_no 中一个；按订单查可再附 item_id；都省略表示最近申请。
 酒店/景点的所在地区必须放 product.area；交通出发地和到达地才用 origin/destination。
