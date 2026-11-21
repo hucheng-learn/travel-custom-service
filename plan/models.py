@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -11,7 +12,9 @@ type FlowId = Literal[
     "order_status_query", "itinerary_query", "itinerary_date_query", "product_query", "refund_request", "ticket_submit",
 ]
 type PlanRoute = Literal["task", "clarify", "chitchat", "knowledge"]
-type Command = Literal["start_flow", "set_slots", "resume_task", "cancel_task"]
+type Command = Literal[
+    "start_flow", "set_slots", "update_slots", "resume_task", "cancel_task", "pause_task", "preview", "refund_status",
+]
 
 ORDER_STATUS: FlowId = "order_status_query"
 ITINERARY: FlowId = "itinerary_query"
@@ -45,6 +48,32 @@ class OrderReference(BaseModel):
         return self
 
 
+class GroundedValue(BaseModel):
+    # 枚举值可以规范化，例如“都退了”→ full，但原始表达必须同时保留，供校验来源。
+    model_config = ConfigDict(extra="forbid")
+    value: str = Field(min_length=1, max_length=100)
+    source: str = Field(min_length=1, max_length=200)
+
+
+class SalesClues(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_id: str | None = Field(None, max_length=19)
+    refund_type: GroundedValue | None = None
+    amount: GroundedValue | None = None
+    ticket_type: GroundedValue | None = None
+    no_order: GroundedValue | None = None
+    reason: str | None = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=1000)
+
+
+class RefundLookup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    order_number: str | None = Field(None, max_length=64)
+    request_id: str | None = Field(None, max_length=19)
+    request_no: str | None = Field(None, max_length=100)
+    item_id: str | None = Field(None, max_length=19)
+
+
 class TurnPlan(BaseModel):
     # 模型只能选择命令并提取线索，不能传 userId、调用地址、Action 名或最终回复。
     model_config = ConfigDict(extra="forbid")
@@ -55,7 +84,15 @@ class TurnPlan(BaseModel):
     task_id: UUID | None = None
     use_current_order: bool = False
     date_text: str | None = Field(default=None, max_length=20)
+    date_value: date | None = None
     product: ProductClues | None = None
+    sales: SalesClues | None = None
+    clear_field: Literal["order", "item", "refund_type", "amount", "reason", "ticket_type", "description"] | None = None
+    intent_text: str | None = Field(None, max_length=500)
+    pause_all: bool = False
+    refund_lookup: RefundLookup | None = None
+    knowledge_topic: Literal["general", "refund_arrival"] | None = None
+    clarify_reason: Literal["ambiguous", "multiple", "model_unavailable", "invalid_model_output"] | None = None
 
 
 type SlotValue = OrderReference | DateRequest | ProductRequest

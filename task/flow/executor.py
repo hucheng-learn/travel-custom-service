@@ -73,6 +73,9 @@ def text_reply(text: str) -> Reply:
 
 
 class FlowExecutor:
+    # 对应技术设计 3.3「订单 YAML 怎样跨两轮执行」：只推进只读查询步骤。
+    # 订单示例为 start → collect_order → lookup → show_result → end；
+    # confirm 属于 AfterSales 的售后代码，不是本执行器支持的 YAML 步骤类型。
     def __init__(
         self, flows: dict[str, LoadedFlow], actions: dict[str, OrderQueryAction | DateItineraryAction | ProductAction],
         areas: AreaCatalog | None = None,
@@ -138,7 +141,8 @@ class FlowExecutor:
         return reference
 
     async def run(self, task: FlowTask, user_id: int, reference: SlotValue | None) -> FlowResult:
-        # 按 YAML 定义的步骤逐步推进，遇到缺槽位、暂停或结束才停下。
+        # 3.3 从 task.step_id 接着执行：第一轮缺订单停在 collect_order，
+        # 第二轮收到卡片后补 order_ref，再进入 lookup；同一轮最多推进 24 步。
         # flow 是 task.flow_id 对应的步骤表；messages 收集本轮要返回的消息；
         # outcome 保存最近一次 Action 的查询结果，供后面的 response 步骤取用。
         # reference 是本轮补上的槽位值，只会被第一个 collect 步骤消费一次。
@@ -154,8 +158,9 @@ class FlowExecutor:
                     # start：空节点，直接跳到流程第一个实际步骤。
                     task.step_id = step.next
                 case CollectStep():
-                    # collect：先吸收本轮补上的槽位，仍缺则追问并把任务停在本步骤等下一轮。
-                    # reference 消费后置空，避免同一份值被后续收集步骤重复使用。
+                    # collect：先填入本轮已校验的槽位值；仍缺字段则返回追问，step_id 不前移。
+                    # 例如同名“鼓楼区”还需要选地区：保留日期并记录 missing_slots=["area"]。
+                    # reference 随后清空，同一输入只供当前收集步骤消费一次。
                     if reference is not None:
                         task.slots[step.slot] = self._apply_area_reply(task, step.slot, reference)
                         reference = None
@@ -165,9 +170,9 @@ class FlowExecutor:
                     task.missing_slots = None
                     task.step_id = step.next
                 case ActionStep():
-                    # 调用注册好的 Action 访问中台，结果只能走 YAML 里声明过的分支。
-                    # 一个流程也可以收集日期或商品条件，不再默认所有 Action 都接收订单号。
-                    # outcome.outcome 是 Action 返回的结果标签，step.routes 把它映射到下一步。
+                    # action：按启动时装配的字典调用对应查询，槽位类型由流程决定。
+                    # 订单 lookup 的 ok → show_result，其他结果走各自解释分支；
+                    # 只按 outcome 选择配置分支，不根据回复文本猜测查询是否成功。
                     outcome = await self._actions[step.action].execute(user_id, task.slots[SLOT_FOR_FLOW[task.flow_id]])
                     task.step_id = step.routes[outcome.outcome]
                 case ResponseStep():
@@ -183,13 +188,16 @@ class FlowExecutor:
                         messages.append(text_reply(TEXT_TEMPLATES[step.template]))
                     task.step_id = step.next
                     if step.pause:
-                        # 展示候选项后停住等用户选择；多轮收集商品条件时，此前确认的条件继续保留。
+                        # 3.3 查不到或暂不可用：先解释，再把 step_id 留在配置的下一收集步骤，
+                        # 清除旧订单/日期引用后结束本轮，避免同一轮自动反复查相同条件。
+                        # 3.4 商品则保留已有条件；展示候选后只等名称/班次选择，不重问日期。
                         slot = SLOT_FOR_FLOW[task.flow_id]
                         if slot != "product_request":
                             task.slots.pop(slot, None)
                         task.missing_slots = ["keyword"] if step.template == "product_options" else [slot]
                         return FlowResult(task, messages)
                 case EndStep():
-                    # end：任务完成，返回 order_id 供会话记录“当前订单”承接后续追问。
+                    # end：返回 task=None，让引擎结束当前任务并尝试恢复暂停任务。
+                    # 查成功的 order_id 一起带回，供后续入住等追问引用。
                     return FlowResult(None, messages, outcome.order_id if outcome else None)
         raise ValueError("订单流程超过单轮最大推进步数，请检查 YAML 跳转")

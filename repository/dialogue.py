@@ -54,6 +54,8 @@ def utc_now() -> datetime:
 
 
 class DialogueRepository:
+    # 对应技术设计 3.1：reserve 用短事务校验归属、判重并预留；finish 用短事务保存结果。
+    # 中间的模型/中台调用发生在事务外，避免等待网络时长时间锁住会话。
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
 
@@ -144,7 +146,8 @@ class DialogueRepository:
             turn.error_code = None
             turn.updated_at = now
 
-            # token 是这一次预留的随机凭据，和轮次 ID 一起写进会话，后续写回要同时匹配。
+            # 3.1 允许开始处理：保存本次轮次 ID、随机 token 和 30 秒期限，并带回当前快照。
+            # 到期接管会换 token；原执行者迟到返回时不能再覆盖新执行者的状态。
             token = uuid4()
             session.processing_turn_id = turn.id
             session.processing_token = token
@@ -158,7 +161,8 @@ class DialogueRepository:
             if session is None or turn is None:
                 raise TurnInProgressError
             now = utc_now()
-            # 快照和回复同事务写入，前端不会读到“回复已保存但任务没推进”的中间状态。
+            # 3.1 每轮收尾：新任务状态、完整回复、completed 状态与处理标记释放同事务提交。
+            # 因而刷新历史后，第一轮的追问和第二轮的查询结果都有对应的已保存轮次。
             session.state_json = snapshot
             session.version = claim.version + 1
             session.updated_at = now

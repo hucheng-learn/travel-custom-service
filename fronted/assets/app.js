@@ -7,7 +7,7 @@ const composer = byId("message-text");
 const textForm = byId("text-form");
 const newChatDialog = byId("new-chat-dialog");
 const previewForm = byId("preview-form");
-const previewMode = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+const previewMode = true;
 const previewKey = "travel-support-preview-user";
 const recentUsersKey = "travel-support-recent-users";
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -54,7 +54,7 @@ function responseError(data, status) {
 async function api(path, { previewUser = userId, ...options } = {}) {
   let response;
   try {
-    // 模拟身份只从环回页面发送，服务端还会校验请求来源。平台环境随同源请求带上登录凭据。
+    // 所有访问地址均支持选择测试用户，服务端继续校验用户是否有效。
     const headers = new Headers(options.headers);
     if (previewMode && previewUser) headers.set("X-Preview-User-Id", previewUser);
     response = await fetch("/api/v1/support" + path, {
@@ -588,15 +588,21 @@ async function restoreConversation() {
   }
 }
 
-previewForm.hidden = !previewMode;
-byId("sessions-status").textContent = previewMode ? "选择用户后查看历史会话。" : "";
-byId("objects-status").textContent = previewMode ? "选择用户并查询后显示卡片。" : "";
-showRecentUsers();
-syncControls();
-const savedUser = readStorage(previewKey);
-if (previewMode && validUserId(savedUser)) {
-  byId("preview-user").value = savedUser;
-  run(() => selectUser(savedUser), "", (message) => showPreviewStatus(message, true));
-} else if (!previewMode) {
-  run(() => selectUser(null), "正在读取客服会话…");
+async function initialize() {
+  // 用户选择不依赖访问地址，局域网变化后无需重新配置。
+  previewForm.hidden = !previewMode;
+  byId("sessions-status").textContent = previewMode ? "选择用户后查看历史会话。" : "";
+  byId("objects-status").textContent = previewMode ? "选择用户并查询后显示卡片。" : "";
+  showRecentUsers();
+  syncControls();
+  const savedUser = readStorage(previewKey);
+  if (previewMode && validUserId(savedUser)) {
+    byId("preview-user").value = savedUser;
+    await selectUser(savedUser);
+  } else if (!previewMode) {
+    await selectUser(null);
+  }
 }
+
+syncControls();
+run(initialize, "正在连接客服…");

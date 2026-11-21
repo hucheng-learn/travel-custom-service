@@ -9,16 +9,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict
 
 
-POLICY_HINT = re.compile(r"政策|规则|退款.{0,12}(?:状态|进度|流水|多久到账|到账|记录|申请|审核|成功|批准)|"
-                         r"退改|免费取消|怎么退|如何退|订单号.{0,16}(?:区别|还是)|酒店.{0,10}起价|使用指南")
-MISSING_DEADLINE = re.compile(r"(?:退款|退回|退钱).*(?:到账|入账).*(?:多久|几天|几小时|何时)|"
-                              r"(?:退款|退回|退钱).*(?:多久|几天|几小时|何时).*到账")
-
-
-def looks_like_knowledge(text: str) -> bool:
-    return POLICY_HINT.search(text) is not None
-
-
 def _normalized(text: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fff]+", "", text.casefold())
 
@@ -50,6 +40,8 @@ class Evidence:
 
 
 class KnowledgeProvider:
+    # 对应技术设计 3.4 右侧：查“酒店免费取消条件”时，读取本地 FAQ 和指南章节。
+    # 检索回答本身不调用生成模型；结果附资料标题、章节和版本，无法确认具体订单的实时事实。
     def __init__(self, faq_file: Path, guide_file: Path) -> None:
         raw = guide_file.read_text(encoding="utf-8")
         header, *sections = re.split(r"^## ", raw, flags=re.MULTILINE)
@@ -73,18 +65,14 @@ class KnowledgeProvider:
     def _cite(self, answer: str, section: str) -> str:
         return f"{answer}\n来源：《{self._title}》·{section}（v{self._version}）"
 
-    def answer(self, text: str) -> tuple[Literal["knowledge", "clarify"], str]:
+    def answer(self, text: str, *, topic: str = "general") -> tuple[Literal["knowledge", "clarify"], str]:
+        # 3.4：语义分类已由规划器完成，这里只按检索证据回答，不再用关键词决定业务意图。
+        # 具体退款状态走 refund_status；通用到账时限读取受限说明，不推断某笔申请已到账。
+        if topic == "refund_arrival":
+            return "knowledge", self._cite("现有资料没有提供固定到账时限，无法确认具体多久。请核对退款申请和流水状态。", "查询退款进度")
         query = _normalized(text)
         if item := self._faq.get(query):
             return "knowledge", self._cite(item.answer, item.section)
-        if "退款" in text and re.search(r"这笔订单|我的订单|某笔订单|订单\s*[A-Za-z0-9]", text):
-            # 具体订单需要查实际退款记录，通用说明无法确认是否到账。
-            return "clarify", "请发送「查退款进度 订单号 你的订单号」，核对这笔订单的退款情况。"
-        if MISSING_DEADLINE.search(text):
-            return "knowledge", self._cite("现有资料没有提供到账时限，我不能确认具体多久。可以先核对退款申请和流水状态。", "查询退款进度")
-        if query in {"退款", "政策", "这个政策是什么", "退改规则", "能退吗", "怎么退", "如何退", "退款政策"}:
-            return "clarify", "你想查某个商品的退改条件，还是已提交退款的处理进度？请补充具体商品或问题。"
-
         terms = {term for term in _tokens(text) if term not in {"怎么", "如何", "请问", "这个", "平台", "你们"}}
         scores = []
         doc_count = len(self._documents)
@@ -102,6 +90,8 @@ class KnowledgeProvider:
                 score += inverse * frequency * 2.2 / (frequency + normalizer)
             scores.append((score, evidence))
         scores.sort(key=lambda item: item[0], reverse=True)
+        # 3.4 有证据才回答：首名不足阈值则说明依据不足；前两名过于接近则先问章节。
+        # 唯一且充分时返回命中章节的原有内容和来源，不推断资料没有给出的到账期限。
         if not scores or scores[0][0] < 1.2:
             return "knowledge", "现有知识资料里没有足够依据回答这个问题，我不会猜测。可以补充具体规则名称或商品。"
         if len(scores) > 1 and scores[1][0] >= scores[0][0] * 0.85:

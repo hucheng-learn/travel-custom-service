@@ -57,6 +57,8 @@ class OperationRepository:
             return row
 
     async def mark_sending(self, claim: ReservedTurn, operation_id: UUID, target: dict) -> bool:
+        # 3.5 抢占发送权：先验证本轮凭据，再只允许 pending → sending，事务提交后才发 POST。
+        # 条件更新未命中的执行者读取已有记录，不另外发一份退款申请。
         async with self._sessions.begin() as db:
             await self._check_claim(db, claim)
             # 只有赢得 pending → sending 的执行者能发 POST。已发送/未知状态绝不重发。
@@ -80,6 +82,8 @@ class OperationRepository:
     async def create_ticket(
         self, claim: ReservedTurn, user_id: int, task_id: UUID, confirmation_id: UUID, target: dict,
     ) -> SupportOperation:
+        # 3.6 真正创建工单的时点：有效确认之后，先按确认 ID 查重，再在一个事务里写
+        # 操作记录、open 工单、created 事件和回执。中途失败一起回滚，重复确认取回原结果。
         async with self._sessions.begin() as db:
             await self._check_claim(db, claim)
             existing = await self._find(db, claim.session_id, confirmation_id)
@@ -107,6 +111,7 @@ class OperationRepository:
             return operation
 
     async def get_ticket(self, user_id: int, ticket_id: int) -> dict:
+        # 3.6 点击“查看处理进度”：只读取当前用户的同一张工单，不新建操作或工单。
         async with self._sessions() as db:
             row = await db.scalar(select(SupportTicket).where(SupportTicket.id == ticket_id, SupportTicket.user_id == user_id))
             if row is None:

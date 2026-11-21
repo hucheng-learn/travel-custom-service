@@ -1,17 +1,14 @@
-import re
 from dataclasses import dataclass
 from datetime import tzinfo
 from uuid import UUID
 
 from knowledge.retrieval import KnowledgeProvider
-from plan.fixed_order_plan import ITINERARY_QUERY, ORDER_QUERY, explicit_control, is_pause_request
-from plan.models import DATE_ITINERARY, FLOW_LABELS, ITINERARY, TICKET, PlanRoute, SlotValue
-from plan.travel_plans import has_multiple_requests
+from plan.models import DATE_ITINERARY, FLOW_LABELS, ITINERARY, REFUND, TICKET, PlanRoute, SlotValue
 from plan.turn_planner import TurnPlanner
 from plan.validator import PlanRejectedError, TurnPlanValidator
 from repository.dialogue import ReservedTurn
 from task.action.order_status import Reply
-from task.after_sales import REFUND_STATUS, AfterSales, sales_intent
+from task.after_sales import AfterSales
 from task.flow.executor import DialogueState, FlowExecutor, FlowTask, text_reply
 
 
@@ -26,6 +23,8 @@ class DialogueResult:
 
 
 class DialogueEngine:
+    # 对应技术设计 3.1～3.3：按输入分流，串起规划、校验、执行，再更新会话任务状态。
+    # 查询交给 FlowExecutor，退款/工单交给 AfterSales；本层结果由 SupportService 统一落库。
 
     def __init__(
         self, executor: FlowExecutor, planner: TurnPlanner, knowledge: KnowledgeProvider | None = None,
@@ -33,7 +32,7 @@ class DialogueEngine:
     ) -> None:
         self._executor = executor
         self._planner = planner
-        self._validator = TurnPlanValidator(executor, zone)
+        self._validator = TurnPlanValidator(executor, zone, after_sales)
         self._knowledge = knowledge
         self._sales = after_sales
 
@@ -49,7 +48,8 @@ class DialogueEngine:
             input_data["type"] == "object" and card_object.get("type") == "order" and state.active_task is None
         )
         if order_card_without_task:
-            # 没有进行中的查询时先暂存这笔订单，再由校验器给出“查支付还是行程”的澄清。
+            # 3.7 只发卡片、没说用途：先暂存 pending_order_id，再追问查支付还是行程。
+            # 此时还没读订单详情，订单归属要等实际查询时核验。
             state.pending_order_id = int(card_object["id"])
         result = await self._dispatch(state, user_id, input_data, claim)
         if not (order_card_without_task and result.route == "clarify"):
@@ -60,90 +60,94 @@ class DialogueEngine:
     async def _dispatch(
         self, state: DialogueState, user_id: int, input_data: dict, claim: ReservedTurn | None = None,
     ) -> DialogueResult:
-        # state.active_task 是本轮开始前的活动任务，paused_tasks 是之前暂停的任务快照，
-        # 后面的分支都围绕这两处状态判断该新开、补槽还是切换任务。
-        # 「暂停所有任务」这类明确指令不经过模型，先把活动查询挂起。
-        if input_data["type"] == "text" and is_pause_request(input_data["text"]):
-            return self._pause_queries(state)
-        if input_data["type"] == "text" and has_multiple_requests(input_data["text"]):
-            # 每轮只处理一项查询，不让模型替用户任选一项，也不丢掉已经收集的条件。
-            return DialogueResult(
-                state, "clarify", [text_reply("这条消息里有多个查询，请先单独发送其中一个问题。")]
-            )
-        if self._sales is not None and claim is not None:
-            # 退款、工单的收集和确认不交给模型，先让售后模块接管这一轮。
-            result = await self._sales_turn(self._sales, state, user_id, input_data, claim)
-            if result is not None:
-                return result
+        # 技术设计 3.1：卡片已经有类型和ID，直接走卡片校验；所有普通文本统一进入模型。
+        # 退款原因、金额补充或插入查订单，也不再由售后模块提前抢走本轮输入。
+        if input_data["type"] == "object":
+            return await self._object_turn(state, user_id, input_data, claim)
         active = state.active_task
         if active is not None and not self._can_resume(active):
-            # YAML/售后配置已升级（版本号变化）时旧任务不能硬跑，请用户重新发起。
             state.active_task = None
-            messages = [text_reply("之前使用的流程已更新，请重新发起这项查询。")]
-            messages.extend(self._restore_previous(state))
-            return DialogueResult(state, "clarify", messages)
-
+            return DialogueResult(state, "clarify", [text_reply("之前使用的流程已更新，请重新发起这项查询。")]
+                                  + self._restore_previous(state))
+        text = input_data["text"]
         try:
-            if input_data["type"] == "object":
-                # 订单卡片、确认卡这类对象消息不经过模型，直接按当前任务生成命令。
-                checked = self._validator.check_order_card(state, input_data["object"]["id"])
-            else:
-                # 文本先交给规划器识别意图，再由校验器确认这个计划能执行。
-                text = input_data["text"]
-                # step 是活动任务当前停留的收集步骤；只有停在该步骤且槽位是 order_ref 时，
-                # 才把 waiting 置为 True，提示规划器这轮可能是在补订单号。
-                step = self._executor.waiting_step(active) if active is not None else None
-                waiting = step is not None and step.slot == "order_ref"
-                # plan 是模型或本地规则给出的计划，只含路线、命令和原文线索；
-                # checked 是校验器补全后的结果，带上了具体任务、流程和核验过的槽位值。
-                plan = await self._planner.plan(text, state, waiting_for_order=waiting)
-                checked = self._validator.check_text(plan, state, text)
+            question = None
+            if active:
+                question = (self._sales.waiting_prompt(active) if active.sales and self._sales else
+                            self._executor.resume_prompt(active.model_copy(deep=True)))
+            plan = await self._planner.plan(text, state, question=question)
+            checked = self._validator.check_text(plan, state, text)
         except PlanRejectedError as error:
-            # 计划不合法就转为澄清，不给用户发起任何查询。
             return DialogueResult(state, "clarify", [text_reply(str(error))])
 
         if checked.route == "chitchat":
-            # 闲聊用固定话术回应，不改动正在进行的任务。
-            return DialogueResult(
-                state, "chitchat", [text_reply("我在。可以查订单、行程、旅游商品，也可以问平台使用规则。")]
-            )
+            return DialogueResult(state, "chitchat", [text_reply("我在。可以查订单、行程、旅游商品，也可以问平台使用规则。")])
         if checked.route == "knowledge":
             if self._knowledge is None:
                 return DialogueResult(state, "knowledge", [text_reply("当前没有可用的知识资料。")])
-            # 知识问答单独回答，不影响正在等待的订单、行程或商品任务。
-            route, answer = self._knowledge.answer(input_data["text"])
+            route, answer = self._knowledge.answer(text, topic=checked.knowledge_topic)
             return DialogueResult(state, route, [text_reply(answer)])
         if checked.route == "clarify":
-            prompt = (
-                self._executor.resume_prompt(active) if active else None
-            )
-            prompt = prompt or "你想查订单、行程、旅游商品，还是平台使用规则？"
-            return DialogueResult(state, "clarify", [text_reply(prompt)])
+            # 澄清是有效的理解结果，不能再用关键词覆盖它；降级时说明能力限制，状态保持不变。
+            prompts = {
+                "multiple": "这条消息里有多个独立请求，请先选一项处理。",
+                "model_unavailable": "文字理解服务暂时不可用，请稍后重试。也可以直接发送订单卡片或使用已有确认卡。",
+                "invalid_model_output": "这次没能可靠理解你的意思，请再说具体一点；也可以直接发送订单卡片。",
+            }
+            return DialogueResult(state, "clarify", [text_reply(prompts.get(checked.clarify_reason,
+                "还不能确定你的意思，请说明这次要查询、补充或修改什么。"))])
 
-        # 以下按计划的命令分别处理：新开流程、补槽位、恢复或取消任务。
-        # checked.task 是校验器定位到的目标任务，checked.reference 是从本轮原文核出来的
-        # 槽位值（订单引用、出行日期或商品条件），两者都可能是 None。
         task = checked.task
-        if checked.command == "start_flow" and checked.flow_id is not None:
-            # 启动新任务；如果已有别的活动任务，_activate 会把它压入暂停栈。
+        if checked.command == "refund_status":
+            if self._sales is None or claim is None:
+                return DialogueResult(state, "clarify", [text_reply("当前无法查询退款进度。")])
+            return DialogueResult(state, "task", await self._sales.status(user_id, claim, checked.refund_search))
+        if checked.command == "start_flow":
+            if checked.flow_id in {REFUND, TICKET}:
+                if self._sales is None or claim is None:
+                    return DialogueResult(state, "clarify", [text_reply("当前无法办理售后，请稍后重试。")])
+                if task:
+                    self._invalidate_confirmation(task)
+                started = self._sales.resume(task) if task else self._sales.start(checked.flow_id)
+                messages = self._activate(state, started.task)
+                if checked.sales_changes:
+                    result = await self._sales.apply(user_id, started.task, checked.sales_changes)
+                    finished = self._finish_sales(state, result)
+                    return DialogueResult(state, "task", messages + finished.messages)
+                return DialogueResult(state, "task", messages + started.messages)
             task = task or self._executor.start(checked.flow_id)
-            messages = self._activate(state, task)
-            return await self._run_flow(state, task, user_id, checked.reference, messages)
-        if checked.command == "set_slots" and task is not None:
-            # 补上当前等待的槽位，然后从原步骤继续推进。
+            return await self._run_flow(state, task, user_id, checked.reference, self._activate(state, task))
+        if checked.command in {"set_slots", "update_slots"}:
+            if task.sales:
+                if self._sales is None or claim is None:
+                    return DialogueResult(state, "clarify", [text_reply("当前无法办理售后，请稍后重试。")])
+                result = await self._sales.apply(user_id, task, checked.sales_changes,
+                    replace=checked.command == "update_slots", clear_field=checked.clear_field)
+                return self._finish_sales(state, result)
             return await self._run_flow(state, task, user_id, checked.reference, [])
-        if checked.command == "resume_task" and task is not None:
+        if checked.command == "preview":
+            return self._finish_sales(state, await self._sales.preview(user_id, task))
+        if checked.command == "resume_task":
             if not self._can_resume(task):
                 self._remove_paused(state, task)
-                return DialogueResult(state, "clarify", [text_reply("旧流程已更新，请重新发起这项查询。")])
-            # 恢复暂停的任务，只提示下一步，不替用户执行查询。
+                return DialogueResult(state, "clarify", [text_reply("旧流程已更新，请重新发起。")])
             messages = self._activate(state, task)
-            messages.extend(self._resume_messages(task))
-            return DialogueResult(state, "task", messages)
-        if checked.command == "cancel_task" and task is not None:
-            # 只结束客服这边的查询任务，不会取消已经预订的订单。
-            messages = [text_reply(f"已停止{FLOW_LABELS[task.flow_id]}，没有修改你的订单。")]
-            if active is not None and task.task_id == active.task_id:
+            return DialogueResult(state, "task", messages + self._resume_messages(task))
+        if checked.command == "pause_task":
+            if checked.pause_all:
+                return self._pause_queries(state)
+            if task is state.active_task:
+                state.active_task = None
+                self._remove_paused(state, task)
+                state.paused_tasks.append(task)
+            task.paused_by_user = True
+            self._invalidate_confirmation(task)
+            return DialogueResult(state, "task", [text_reply(f"已暂停{FLOW_LABELS[task.flow_id]}，需要时可以要求继续。")])
+        if checked.command == "cancel_task":
+            # 停止的是客服任务，不触发取消预订或退款接口；恢复最近的非主动暂停任务。
+            self._invalidate_confirmation(task)
+            messages = [text_reply(f"已停止{FLOW_LABELS[task.flow_id]}。")]
+            if task is state.active_task:
                 state.active_task = None
                 messages.extend(self._restore_previous(state))
             else:
@@ -151,47 +155,33 @@ class DialogueEngine:
             return DialogueResult(state, "task", messages)
         raise ValueError("通过校验的计划缺少执行目标")
 
-    async def _sales_turn(
-        self, sales: AfterSales, state: DialogueState, user_id: int, input_data: dict, claim: ReservedTurn,
-    ) -> DialogueResult | None:
-        # active 是当前客服任务；obj 和 text 分别来自对象消息和文本消息，二者最多只有一个有内容。
+    async def _object_turn(self, state, user_id, incoming, claim):
+        obj = incoming["object"]
         active = state.active_task
-        obj = input_data.get("object", {})
-        text = input_data.get("text", "").strip()
+        sales = self._sales
         if obj.get("type") == "confirmation":
-            # 确认卡只回传 id 和 decision，真正要提交的目标保存在服务端任务草稿里。
-            confirmation_id = UUID(obj["id"])
-            # replay 不为空说明这张卡之前已经处理过，只回放旧回执，不再执行写操作。
-            replay = await sales.replay(user_id, claim, confirmation_id, obj["decision"])
+            if sales is None or claim is None:
+                return DialogueResult(state, "clarify", [text_reply("这张确认卡当前不可用。")])
+            replay = await sales.replay(user_id, claim, UUID(obj["id"]), obj["decision"])
             if replay is not None:
-                # 旧确认只回放自己的回执，不能结束另一个活动任务。
-                if active and active.sales and active.sales.confirmation and active.sales.confirmation.id == confirmation_id:
+                if active and active.sales and active.sales.confirmation and str(active.sales.confirmation.id) == obj["id"]:
                     return self._finish_sales(state, replay)
                 return DialogueResult(state, "task", replay.messages)
-            if active is None or not sales.supports(active.flow_id):
-                return DialogueResult(state, "clarify", [text_reply("这张确认卡已失效或不属于当前会话。")])
+            if active is None or active.sales is None or not sales.can_resume(active):
+                return DialogueResult(state, "clarify", [text_reply("这张确认卡已失效或不属于当前任务。")])
+            return self._finish_sales(state, await sales.process(user_id, active, incoming, claim))
+        if active and not self._can_resume(active):
+            state.active_task = None
+            return DialogueResult(state, "clarify", [text_reply("之前的流程已更新，请重新发起。")]
+                                  + self._restore_previous(state))
+        if active and active.sales and sales and claim:
+            return self._finish_sales(state, await sales.process(user_id, active, incoming, claim))
+        try:
+            checked = self._validator.check_order_card(state, obj["id"])
+        except PlanRejectedError as error:
+            return DialogueResult(state, "clarify", [text_reply(str(error))])
+        return await self._run_flow(state, checked.task, user_id, checked.reference, [])
 
-        if match := REFUND_STATUS.fullmatch(text):
-            # match[1] 是用户附带的申请编号、订单号或空字符串，空表示查最近的退款申请。
-            return DialogueResult(state, "task", await sales.status(user_id, claim, match[1].strip()))
-        flow_id = sales_intent(text)
-        # choosing_type 表示当前正停在工单类型步骤，用户回“投诉”是在填槽位，不能重新开一个工单。
-        choosing_type = active is not None and active.flow_id == TICKET and active.step_id == "ticket_type"
-        if flow_id and not (choosing_type and text.rstrip("。！!") == "投诉"):
-            # existing 是同类型的旧任务：优先活动任务，其次最近的暂停任务，能恢复就恢复，避免重复新建。
-            existing = next((task for task in [active, *reversed(state.paused_tasks)]
-                             if task is not None and task.flow_id == flow_id and sales.can_resume(task)), None)
-            started = sales.resume(existing) if existing else sales.start(flow_id)
-            messages = self._activate(state, started.task)
-            return DialogueResult(state, "task", messages + started.messages)
-        if active is None or not sales.supports(active.flow_id) or not sales.can_resume(active):
-            return None
-        # reads 判断这句是不是“先查订单”“看一下行程”这类查询开头；是的话交回主流程，售后不抢这一轮。
-        reads = re.match(r"^(?:(?:先|再|顺便|另外|请|帮我|我想)\s*)*(?:查|看)", text)
-        if explicit_control(text) is not None or (reads and (ORDER_QUERY.search(text) or ITINERARY_QUERY.search(text))):
-            return None
-        # 原因和投诉描述留在客服服务内，不交给外部模型当意图样本。
-        return self._finish_sales(state, await sales.process(user_id, active, input_data, claim))
 
     def _finish_sales(self, state: DialogueState, result) -> DialogueResult:
         # result.task 为 None 表示售后任务已经结束（提交成功、拒绝或取消），这时可以恢复之前暂停的查询。
@@ -238,7 +228,8 @@ class DialogueEngine:
         # reference 是本轮要补进任务的槽位值；messages 是调用前已经产生的提示，
         # 例如“先暂停某项任务”。
         result = await self._executor.run(task, user_id, reference)
-        # result.task 为 None 表示流程走到 end；order_id 是这轮查到的订单，留给后续追问引用。
+        # 3.1/3.7：缺槽时保留任务和等待位置；走到 end 则清空活动任务。
+        # 只有 Action 实际查成功带回的 order_id 才记为当前订单，供“具体哪天入住”追问使用。
         state.active_task = result.task
         if result.order_id is not None:
             state.current_order_id = result.order_id
@@ -253,6 +244,8 @@ class DialogueEngine:
         state.paused_tasks = [paused for paused in state.paused_tasks if paused.flow_id != task.flow_id]
 
     def _activate(self, state: DialogueState, task: FlowTask) -> list[Reply]:
+        # 3.3 四轮切换示例的第二轮：查订单 A 时插入查行程 B，保留 A 的 task_id、
+        # step_id 和槽位并放入暂停栈，再把 B 设为活动任务；未完成的售后确认须先作废。
         # 把 task 设为活动任务，并把它从暂停栈里移除；messages 收集“先暂停某项任务”的提示。
         self._remove_paused(state, task)
         task.paused_by_user = False
@@ -278,7 +271,9 @@ class DialogueEngine:
         return messages
 
     def _restore_previous(self, state: DialogueState) -> list[Reply]:
-        # 按后进先出遍历暂停栈，跳过用户主动暂停的任务；恢复一项就停下，避免一次自动恢复多项。
+        # 3.3 第三轮：行程 B 完成后恢复最近一个可继续的 A；跳过主动暂停的任务。
+        # 只恢复状态并提示 A 还缺什么，不把刚才给 B 的卡片再次交给执行器。
+        # 所以本例必须在第四轮再发一次订单卡片，才能完成 A 的支付查询。
         messages = []
         for previous in reversed(state.paused_tasks.copy()):
             if previous.paused_by_user:

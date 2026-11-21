@@ -34,6 +34,8 @@ class ProductCheck:
 
 
 def check_product(request: ProductRequest, catalog: AreaCatalog) -> ProductCheck:
+    # 对应技术设计 3.4 左侧：先核对品类、唯一地区和所需日期，缺哪项就追问哪项。
+    # “鼓楼区”有多个候选时返回 missing=area，执行器保存原日期并等待完整地名。
     kind = request.kind
     if kind is None:
         return ProductCheck("kind", "你想查酒店、景点、机票、火车票、汽车票，还是接送？")
@@ -94,12 +96,16 @@ def _reply(text: str) -> tuple[dict, ...]:
 
 
 class ProductAction:
+    # 对应技术设计 3.4：已收集的商品条件 → 中台搜索 → 列表或唯一商品的详情/报价。
+    # 多个候选要等用户选定，不能用第一项的价格代替用户真正想查的商品。
     def __init__(self, travel: TravelClient | None, catalog: AreaCatalog, business_timezone: str) -> None:
         self._travel = travel
         self._catalog = catalog
         self._timezone = business_timezone
 
     async def execute(self, user_id: int, request: ProductRequest) -> ActionResult:
+        # 再检查条件后按品类映射接口参数；返回实际查询结果和受控 outcome，
+        # 由 FlowExecutor 决定结束、等用户选择，还是解释查不到/暂不可用。
         result = check_product(request, self._catalog)
         kind, travel, day = request.kind, self._travel, request.business_date
         if travel is None or result.areas is None or kind is None or day is None:
@@ -119,7 +125,8 @@ class ProductAction:
             city = self._catalog.city_for(area)
             params.update(areaId=city.id, travelDate=day.isoformat())
             if city != area:
-                # 景点接口以城市为单位，保留用户选中的区县，用返回的地址确认所属区县。
+                # 3.4 选定福州市鼓楼区后：景点接口按福州市查，再按返回地址筛选鼓楼区，
+                # 不能把区县 ID 当城市 ID 传入，否则会把可订景点误查成空列表。
                 scenic_district = area
                 params["pageSize"] = SCENIC_CITY_PAGE_SIZE
         elif kind in TRANSPORT_KINDS:

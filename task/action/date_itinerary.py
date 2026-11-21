@@ -18,7 +18,8 @@ LOOKUP_SECONDS = 12
 def _date_note(item: dict, requested: date, zone: tzinfo) -> str | None:
     start = upstream_travel_date(item.get("travelTime"), zone)
     end = upstream_travel_date(item.get("travelEndTime"), zone)
-    # 酒店按入住到退房这段日期匹配；其它品类以开始/出发日为准。
+    # 对应技术设计 3.7 日期示例：1 月 7 日入住、10 日退房，7 日标入住，8/9 日在住，
+    # 10 日单独标退房，11 日不匹配这条住宿；其它品类按开始/出发日匹配。
     if item.get("productTypeCode") == "hotel_room" and start and end and end >= start:
         if requested == end:
             return "当天退房"
@@ -30,6 +31,8 @@ def _date_note(item: dict, requested: date, zone: tzinfo) -> str | None:
 
 
 class DateItineraryAction:
+    # 对应技术设计 3.7 第三条查询：“2027-01-08 的出行安排”只需要日期。
+    # 分页查本人订单 → 分批并发读详情 → 按明细出行/住宿日期匹配；不按订单创建日期过滤。
     def __init__(self, travel: TravelClient | None, zone: tzinfo) -> None:
         self._travel = travel
         self._zone = zone
@@ -85,6 +88,8 @@ class DateItineraryAction:
                 return ActionResult("unavailable")
             gaps = True
 
+        # 3.7 汇总：查完且无遗漏，才能明确说当天没有安排；分页达到上限或部分读取失败，
+        # 必须说明只覆盖已查范围，并提示可改按订单号核对，不能把漏查说成没有行程。
         day = request.travel_date.isoformat()
         complete = ended and not gaps
         if matches:

@@ -81,6 +81,9 @@ def display_business_time(value: object, business_timezone: str) -> str | None:
 class OrderQueryAction:
     """共用订单定位、归属校验和查询时限；子类只负责各自的查询结果。"""
 
+    # 对应技术设计 3.7 前两条查询：支付和指定订单行程共用订单定位与归属核验。
+    # 文本编号在本人订单列表精确匹配；卡片主键直接查详情，再由子类决定读什么业务数据。
+
     def __init__(self, travel: TravelClient | None, business_timezone: str) -> None:
         self._travel = travel
         self._business_timezone = business_timezone
@@ -109,6 +112,7 @@ class OrderQueryAction:
                         return ActionResult("not_found")
                     if not orders:
                         return ActionResult("unavailable")
+                # 到达分页上限仍未匹配，只能说明已查范围内没找到，不能断言订单不存在。
                 return ActionResult("search_limited")
         except TravelHTTPError as error:
             if error.status_code in {401, 403}:
@@ -147,6 +151,8 @@ class OrderQueryAction:
 
 
 class OrderStatusAction(OrderQueryAction):
+    # 3.7 “这笔订单支付了吗”：从已校验订单读取状态和实付，再另查支付记录。
+    # 成功回复包含实际记录；订单状态、实付金额和支付流水分别展示，避免混为同一字段。
     async def _render_order(
         self, travel: TravelClient, user_id: int, order_id: int, order_number: str, order: dict
     ) -> tuple[Reply, ...]:

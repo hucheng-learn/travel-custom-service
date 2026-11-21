@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 try:
                     llm = LlmClient(model_http, settings)
                 except (ValueError, httpx.InvalidURL):
-                    logger.warning("模型配置不完整或地址无效，使用本地对话规则")
+                    logger.warning("模型配置不完整或地址无效，仅启用有限输入降级与卡片操作")
             # 地区种子和知识资料由本应用本地加载，模型不能自行提供任何地区 ID 或政策。
             areas_path = ROOT / settings.travel_areas_csv if settings.travel_areas_csv else RESOURCES / "travel_areas.csv"
             areas = AreaCatalog(areas_path)
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 products.ACTION_NAME: products.ProductAction(travel, areas, settings.business_timezone),
             }
             after_sales = AfterSales(sales_config, travel, operations, zone, settings.refund_write_enabled)
-            engine = DialogueEngine(FlowExecutor(flows, actions, areas), TurnPlanner(llm, areas), knowledge, zone, after_sales)
+            engine = DialogueEngine(FlowExecutor(flows, actions, areas), TurnPlanner(llm, zone), knowledge, zone, after_sales)
             app.state.support_service = SupportService(repository, engine, travel, operations)
             stack.push_async_callback(app.state.support_service.drain)
         yield
@@ -130,7 +130,7 @@ async def health() -> dict[str, str]:
 
 def main() -> None:
     # 开发时修改 Python 代码会自动重载。传模块路径，让 Uvicorn 能重新导入应用。
-    uvicorn.run("app.main:app", host="127.0.0.1", port=18082, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=18082, reload=True)
 
 
 # 只有直接运行模块时才启动服务；导入 app 时不会额外启动一个进程。

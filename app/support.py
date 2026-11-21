@@ -67,18 +67,11 @@ class OrderMessage(IncomingMessage):
 
 
 def get_user_id(
-    request: Request, response: Response, value: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    response: Response, value: Annotated[str | None, Header(alias="X-User-Id")] = None,
     preview: Annotated[str | None, Header(alias="X-Preview-User-Id")] = None,
 ) -> int:
-    # 模拟身份只允许本机同源页面直连，平台网关注入的身份优先。
-    local_hosts = {"127.0.0.1", "::1", "localhost"}
-    if (
-        value is None and preview is not None and request.client and request.client.host in local_hosts
-        and request.url.hostname in local_hosts
-        and request.headers.get("origin") in {None, f"{request.url.scheme}://{request.url.netloc}"}
-        and not any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers)
-        and request.headers.get("sec-fetch-site") in {None, "same-origin", "none"}
-    ):
+    # 测试身份不限制访问地址或网段，切换局域网后仍可使用；平台身份优先。
+    if value is None:
         value = preview
     if value is None or len(value) > 19 or not value.isascii() or not value.isdecimal():
         raise UnauthenticatedError
@@ -126,6 +119,7 @@ async def create_session(user_id: UserId, service: Service) -> dict:
 
 @router.post("/sessions/{session_id}/messages")
 async def send_message(session_id: UUID, body: Message, user_id: UserId, service: Service, request: Request) -> dict:
+    # 技术设计 3.1：普通消息入口。messageId 用于判重，文本或卡片交给同一条服务主链路。
     return await service.message(
         session_id, user_id, body.message_id, body.model_dump(mode="json", exclude={"message_id"}), trace_for(request),
     )
@@ -146,7 +140,8 @@ async def _stream_turn(
                 if not finished:
                     yield ": waiting\n\n"
             response = response.result()
-        # 只有完整轮次落库后才回放文本；对象和最终快照都由 done 一并返回。
+        # 技术设计 3.1「两轮各自怎样收尾」：先等整轮状态和回复落库，再分段发送文本。
+        # 这里切分的是已保存的完整回复；对象卡片和最终结果随 done 一并返回。
         for index, message in enumerate(response["messages"]):
             if message["type"] == "text":
                 text = message["text"]
@@ -164,7 +159,8 @@ async def stream_message(
 ) -> StreamingResponse:
     input_data = body.model_dump(mode="json", exclude={"message_id"})
     trace_id = trace_for(request)
-    # 开流前先确认身份、归属和幂等冲突；这类错误仍正常返回 HTTP 状态码。
+    # 技术设计 3.1「每条消息进入时」：先检查会话归属、重复消息和处理中的轮次，
+    # 再建立 SSE 响应；冲突仍可返回 HTTP 409，不会先开流再告诉用户无法处理。
     reserve_result = await service.reserve_message(session_id, user_id, body.message_id, input_data)
     if reserve_result.replay is not None:
         turn_id = reserve_result.replay["turnId"]
@@ -172,6 +168,8 @@ async def stream_message(
     else:
         assert reserve_result.claim is not None
         turn_id = str(reserve_result.claim.turn_id)
+        # 开始预留对话轮次
+        # 此时已预留成功；后台执行 run_reserved，断开 SSE 连接也不取消本轮处理。
         response = service.start_reserved(reserve_result.claim, user_id, body.message_id, input_data, trace_id)
     accepted = {"sessionId": str(session_id), "messageId": str(body.message_id), "turnId": turn_id}
     return StreamingResponse(_stream_turn(accepted, response, trace_id), media_type="text/event-stream",

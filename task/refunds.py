@@ -55,6 +55,8 @@ def refund_receipt(row: dict) -> dict:
 
 
 class Refunds:
+    # 对应技术设计 3.5：preflight 核对能退多少 → submit 再预检、记录发送权并发 POST
+    # → reconcile 核对不明结果。成功只表示退款申请已创建，到账仍以审核和退款流水为准。
     def __init__(self, travel: TravelClient, operations: OperationRepository, zone: tzinfo) -> None:
         self._travel = travel
         self._operations = operations
@@ -76,6 +78,8 @@ class Refunds:
         return rows, False
 
     async def preflight(self, user_id: int, order_id: int, item_id: int) -> tuple[dict, Decimal, set[int]]:
+        # 3.5 生成确认卡前和确认提交时都要查：本人订单、明细状态、进行中申请、剩余金额。
+        # 返回当前可退金额及已有申请 ID 基线；金额来自查询，不使用图中示例金额做业务判断。
         # 三个请求并发：订单详情、订单退款记录、本人退款申请列表。
         order, refunds, requests = await asyncio.gather(
             self._travel.get_order(user_id, order_id),
@@ -112,7 +116,8 @@ class Refunds:
     async def submit(
         self, claim: ReservedTurn, user_id: int, task_id: UUID, confirmation_id: UUID, target: dict,
     ) -> SupportOperation:
-        # 中台没有跨系统幂等键，这里用操作记录保证同一笔退款只提交一次。
+        # 3.5 同意提交分支：先核对旧操作，再重新预检，最后争取本次操作的发送权。
+        # 操作记录约束本服务的确认重放；中台 POST 没有跨系统幂等键，不能承诺全局只提交一次。
         order_id, item_id = int(target["orderId"]), int(target["itemId"])
         # uncertain 是同订单同明细之前没确认结果的写操作，存在时先核对，不再重复提交。
         uncertain = await self._operations.latest_uncertain(claim.session_id, order_id=order_id, item_id=item_id)
@@ -135,6 +140,8 @@ class Refunds:
             existing = await self._operations.find(claim.session_id, confirmation_id)
             return await self.reconcile(user_id, existing or row)
         try:
+            # 3.5 真正创建退款申请的时点：前面已提交操作记录，并成功抢占 sending。
+            # 使用服务端摘要发 POST，回执必须与订单、明细和金额一致才能认作明确成功。
             result = await self._travel.create_refund_request(user_id, order_id, item_id, float(amount), target["reason"])
             receipt = refund_receipt(result)
             if (receipt["orderId"], receipt["itemId"], receipt["amount"]) != (order_id, item_id, str(amount)):
@@ -160,7 +167,9 @@ class Refunds:
         return await self.reconcile(user_id, row)
 
     async def reconcile(self, user_id: int, row: SupportOperation) -> SupportOperation:
-        # 核对处于 sending/unknown 的写操作，绝不重发请求。
+        # 3.5 结果不明分支：只查询 sending/unknown 对应的中台申请，不重发退款 POST。
+        # 订单、明细、金额、时间窗和提交前基线都匹配，且完整列表中只有一个候选，才认领成功。
+        # 否则继续保留 unknown，让用户稍后查进度，不能把网络超时当作“申请未提交”。
         if row.status not in {"sending", "unknown"}:
             return row
         # target 是提交时保存的订单、明细、金额和申请基线。

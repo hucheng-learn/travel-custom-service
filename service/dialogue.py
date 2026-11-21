@@ -30,6 +30,8 @@ def _api_time(value: datetime) -> str:
 
 
 class SupportService:
+    # 对应技术设计 3.1：message/reserve_message 判重并预留 → run_reserved 恢复快照、
+    # 调用引擎 → repository.finish 保存新状态和回复。普通接口与 SSE 共用后两步。
     def __init__(
         self, repository: DialogueRepository, engine: DialogueEngine, travel: TravelClient | None,
         operations: OperationRepository | None = None,
@@ -133,8 +135,9 @@ class SupportService:
     async def reserve_message(
         self, session_id: UUID, user_id: int, message_id: UUID, input_data: dict,
     ) -> ReserveResult:
-        # 算出这条消息内容的哈希指纹；重试命中时直接回放旧结果，不再调用模型或中台。
-        # digest 只用于判断“同一个 messageId 的内容有没有变”，不保存消息原文本身。
+        # 3.1 接入：计算输入摘要，由仓储核对同一 messageId 是否仍是同一份输入。
+        # 内容相同且已完成才回放；内容冲突或会话仍在处理中则拒绝并发推进。
+        # digest 是内容指纹，原输入另存于轮次 input_json；判重不是比较一句话的意图。
         digest = sha256(json.dumps(input_data, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
         return await self._repository.reserve(session_id, user_id, message_id, digest, input_data)
 
@@ -153,10 +156,11 @@ class SupportService:
         self, claim: ReservedTurn, user_id: int, message_id: UUID, input_data: dict, trace_id: str = "-",
     ) -> dict:
         try:
-            # state 是上次提交的状态快照；result 带本轮新状态、走向和要返回的消息。
+            # 3.1 两轮衔接：第一轮“帮我查订单”保存了等订单号的任务；第二轮发卡时，
+            # 从 claim.snapshot 还原这个任务及其等待位置，再交给引擎补订单引用。
+            # 快照包括活动任务、暂停栈和订单线索，并非把完整聊天历史重新传给模型。
             state = DialogueState.model_validate(claim.snapshot)
-            # 还原上次保存的会话状态，由引擎决定这一轮走哪条路径：
-            # 识别意图、校验条件、推进查询流程，退款和工单走售后分支。
+            # 引擎返回本轮新状态、路由和消息；退款、工单走售后分支，查询走只读流程。
             result = await self._engine.run(state, user_id, input_data, claim)
         except TravelHTTPError as error:
             # 中台 401：标记本轮失败并释放处理标记，由路由转成未认证响应。
@@ -172,7 +176,8 @@ class SupportService:
             "sessionId": str(claim.session_id), "messageId": str(message_id), "turnId": str(claim.turn_id),
             "route": result.route, "messages": result.messages, "stateVersion": claim.version + 1,
         }
-        # 新快照和回复在同一个短事务里提交，落库之后才返回或推送。
+        # 3.1 收尾：核验处理令牌和版本后，新快照与本轮回复同事务保存并释放处理标记。
+        # 第一轮的等待位置或第二轮的查询完成状态，都在这里提交，之后才返回或推送结果。
         await self._repository.finish(claim, result.state.model_dump(mode="json"), response)
         # task 只是打日志用：记录这轮结束后停在哪个流程和步骤。
         task = result.state.active_task

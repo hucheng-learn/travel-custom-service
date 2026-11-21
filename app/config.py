@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # 中台重建种子后，可以改用同一批次的地区 CSV，不需要改代码。
     travel_areas_csv: Path | None = None
 
-    # 模型只负责生成计划。限时后回退到规则，整轮仍能在数据库处理标记过期前结束。
+    # 模型理解文本并生成计划，超时后仅接受有限明确输入；最多12秒，售后另限16秒。
     llm_base_url: str | None = None
     llm_model: str | None = None
     llm_api_key: SecretStr | None = None

@@ -22,7 +22,13 @@ class ProductClues(BaseModel):
     destination: str | None = Field(None, max_length=80)
     date_text: str | None = Field(None, max_length=20)
     end_date_text: str | None = Field(None, max_length=20)
+    date_value: date | None = None
+    end_date_value: date | None = None
     keyword: str | None = Field(None, max_length=80)
+    hotel_star_rating: Literal["3", "4", "5"] | None = None
+    hotel_star_text: str | None = Field(None, max_length=40)
+    hotel_type: Literal["luxury", "business", "resort", "boutique"] | None = None
+    hotel_type_text: str | None = Field(None, max_length=40)
     detail: bool = False
     quote: bool = False
 

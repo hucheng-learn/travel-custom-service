@@ -50,9 +50,6 @@ class AreaCatalog:
                 self._index(area)
         if not self._names:
             raise ValueError("地区映射没有可用条目")
-        # 优先匹配长名字，例如“北京市朝阳区”不能先被截成“北京”。
-        keys = sorted(self._names, key=lambda key: (-len(key), key))
-        self._mention_pattern = re.compile("|".join(re.escape(key) for key in keys))
 
     def _index(self, area: Area) -> None:
         parts = [part for part in area.full_name.split("/") if part not in GENERIC_NAMES]
@@ -106,14 +103,3 @@ class AreaCatalog:
             if self.resolve(scoped_name) == narrowed:
                 return scoped_name
         return name
-
-    def mentions(self, text: str) -> list[str]:
-        # 忽略层级分隔符做最长匹配，再取回原文片段供计划校验。顺序和重复地名都保留。
-        offsets = []
-        start = 0
-        for separator in AREA_SEPARATORS.finditer(text):
-            offsets.extend(range(start, separator.start()))
-            start = separator.end()
-        offsets.extend(range(start, len(text)))
-        normalized = "".join(text[offset] for offset in offsets)
-        return [text[offsets[match.start()]:offsets[match.end() - 1] + 1] for match in self._mention_pattern.finditer(normalized)]

@@ -39,7 +39,9 @@ class LlmClient:
             "model": self._model,
             "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": context}],
             "response_format": {"type": "json_object"},
-            "max_tokens": 256,
+            "temperature": 0,
+            # 一轮可同时补订单、类型和原因，给结构化计划留足输出空间，避免字段被截断。
+            "max_tokens": 1200,
         }
         if self._url.host.endswith(".aliyuncs.com") and "/compatible-mode/" in self._url.path:
             # 百炼的 JSON 模式要求关闭思考；其他兼容服务不必接受这个扩展字段。

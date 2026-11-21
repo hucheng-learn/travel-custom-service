@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -46,8 +47,14 @@ async def test_scenic_area_follow_up_narrows_candidates_and_keeps_date(replies, 
     async with httpx.AsyncClient(base_url="http://test/api/v1/", transport=httpx.MockTransport(scenic_inventory)) as http:
         action = ProductAction(TravelClient(http, timeout_seconds=5), areas, "Asia/Shanghai")
         executor = FlowExecutor(flows, {ACTION_NAME: action}, areas)
-        llm = Mock(spec=LlmClient, propose=AsyncMock(return_value='{"route":"clarify"}'))
-        engine = DialogueEngine(executor, TurnPlanner(llm, areas))
+        plans = [{"route": "task", "command": "start_flow", "flow_id": "product_query", "product": {
+            "kind": "scenic", "area": "鼓楼区", "date_text": "2026-11-20",
+        }}]
+        plans.extend({"route": "task", "command": "set_slots", "product": {
+            "kind": "scenic", "area": reply.removesuffix("有哪些景点"),
+        }} for reply in replies)
+        llm = Mock(spec=LlmClient, propose=AsyncMock(side_effect=[json.dumps(plan) for plan in plans]))
+        engine = DialogueEngine(executor, TurnPlanner(llm))
 
         result = await engine.run(DialogueState(), 73, {"type": "text", "text": "2026-11-20 鼓楼区有哪些景点"})
         assert "福州市 / 鼓楼区" in result.messages[0]["text"]
@@ -70,4 +77,4 @@ async def test_scenic_area_follow_up_narrows_candidates_and_keeps_date(replies, 
             assert "其他区景点" not in message and "地址缺失的景点" not in message
         else:
             assert "没有查到" in message and "中山陵园风景区" not in message
-        llm.propose.assert_not_awaited()
+        assert llm.propose.await_count == len(plans)

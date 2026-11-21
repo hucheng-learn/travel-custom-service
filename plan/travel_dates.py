@@ -8,10 +8,6 @@ WEEKDAYS = "一二三四五六日"
 WEEK_PATTERN = re.compile(r"(下下|上上|本|这|下|上)?(?:周|星期)([一二三四五六日天])")
 FULL_DATE = re.compile(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})")
 CHINESE_DATE = re.compile(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})[日号]?")
-DATE_TOKEN = re.compile(
-    r"(?<!\d)\d{4}[-/]\d{1,2}[-/]\d{1,2}(?!\d)|(?:\d{4}年)?\d{1,2}月\d{1,2}[日号]?"
-    r"|(?:下下|上上|本|这|下|上)?(?:周|星期)[一二三四五六日天]|大后天|后天|明天|今天|昨天|前天"
-)
 
 
 def business_zone(name: str) -> tzinfo:
@@ -28,10 +24,6 @@ def business_zone(name: str) -> tzinfo:
 
 def calendar_today(zone: tzinfo) -> date:
     return datetime.now(UTC).astimezone(zone).date()
-
-
-def find_date_texts(text: str) -> list[str]:
-    return [match[0] for match in DATE_TOKEN.finditer(text)]
 
 
 def parse_date_text(text: str, today: date) -> date:

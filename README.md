@@ -24,7 +24,17 @@ Invoke-RestMethod http://127.0.0.1:18082/health | ConvertTo-Json -Compress
 
 点击订单卡可发送订单，已订商品卡可发送关联订单；退款和工单卡可看进度。网络错误后点击「重试」会沿用原消息 ID。
 
-身份选择仅适用于本机直连。对外部署由平台登录层校验身份，网关移除客户端传入的 `X-User-Id` 并注入已验证的用户 ID。客服 API 只能经网关访问。接口联调仍可使用本机的 `/docs`。
+当前为测试联调模式，所有能访问服务的设备均可选择中台测试用户，不限制本机或网段。对外正式部署需要另行接入平台登录校验，不能将测试用户选择作为登录认证。
+
+## 局域网联调
+
+服务启动入口监听 `0.0.0.0:18082`。同一局域网设备访问 `http://<本机 Wi-Fi 或以太网 IPv4>:18082/`，即可选择中台测试用户。局域网变化后使用本机的新 IP，无需维护网段配置。不要使用 WSL、Docker 虚拟网卡的地址。
+
+Windows 防火墙需允许局域网访问 TCP 18082。以管理员身份运行 PowerShell，`LocalSubnet` 自动适配当前局域网：
+
+```powershell
+New-NetFirewallRule -DisplayName "Travel Support LAN 18082" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 18082 -RemoteAddress LocalSubnet -Profile Any
+```
 
 ## 初始化客服数据库（MySQL 8）
 
@@ -80,7 +90,9 @@ async def check_travel(user_id: int, order_id: int) -> None:
 
 ## 阶段二：模型计划与多轮控制
 
-`.env` 的 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 会被直接使用。模型只判断意图和提取订单号；订单、支付和行程仍从旅游中台查。模型暂不可用时使用本地规则，格式或指令不合法时提示澄清。模型请求包含当前输入和任务类型，不包含客服库的历史、用户 ID 或中台订单详情。
+`.env` 的 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 用于所有普通文本的语义理解，包括查询、退款/工单补充、修改和任务控制。模型返回结构化计划，代码校验原文依据、任务范围、金额及归属，业务事实仍从旅游中台或知识资料读取。订单卡片和确认按钮直接校验；文字同意提交只预览，实际写入须点击有效确认卡。模型故障时只保留有限明确输入并提示降级，不猜自由表达。请求包含本轮文字（包括本轮原因/描述）和必要任务摘要，不发送完整历史、用户 ID、中台订单明细或确认目标；历史原因/描述只发送是否已填。
+
+自动化回归用 `uv run pytest -q -p no:cacheprovider`；真实模型表达验收用 `uv run python tests/evaluate_semantics.py`。后者读取当前模型配置、使用固定的虚构输入，只请求模型并本地校验计划，不调用中台或创建退款/工单；样本结果写入 `.screenshots/model-evaluation.json`，不能代替真实页面验收。
 
 用同一个 `sessionId` 和 `X-User-Id`，每条新消息换一个 `messageId`：
 

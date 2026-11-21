@@ -39,7 +39,9 @@ async def test_pending_order_card_answers_followup():
             ACTION_NAME: OrderItineraryAction(travel, "Asia/Shanghai"),
             STATUS_ACTION_NAME: OrderStatusAction(travel, "Asia/Shanghai"),
         })
-        llm = Mock(spec=LlmClient, propose=AsyncMock(return_value='{"route":"clarify"}'))
+        llm = Mock(spec=LlmClient, propose=AsyncMock(return_value=json.dumps({
+            "route": "task", "command": "start_flow", "flow_id": "itinerary_query", "use_current_order": True,
+        })))
         engine = DialogueEngine(executor, TurnPlanner(llm))
 
         # 发送订单卡片时没有进行中的任务：先暂存这笔订单并追问要查哪项。
@@ -54,7 +56,7 @@ async def test_pending_order_card_answers_followup():
         assert result.state.active_task is None
         reply = result.messages[0]["text"]
         assert all(field in reply for field in ("白天鹅宾馆", "入住 2027-01-07", "退房 2027-01-10"))
-        llm.propose.assert_not_awaited()
+        llm.propose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -106,14 +108,18 @@ async def test_order_itinerary_displays_hotel_stay(question, previous_order_quer
             # 模拟两次 API 请求之间从会话快照恢复，而不是沿用内存对象。
             state = DialogueState.model_validate(result.state.model_dump(mode="json"))
 
+        llm.propose.return_value = json.dumps({
+            "route": "task", "command": "start_flow", "flow_id": "itinerary_query", "use_current_order": previous_order_query,
+        })
         result = await engine.run(state, 73, {"type": "text", "text": question})
         if not previous_order_query:
             assert result.state.active_task is not None and result.state.active_task.flow_id == ITINERARY
             assert "订单号" in result.messages[0]["text"]
             state = DialogueState.model_validate(result.state.model_dump(mode="json"))
+            llm.propose.return_value = json.dumps({"route": "task", "command": "set_slots", "order_number": order_number})
             result = await engine.run(state, 73, {"type": "text", "text": order_number})
         assert result.state.active_task is None
         reply = result.messages[0]["text"]
         assert all(field in reply for field in ("白天鹅宾馆", "套房", "入住 2027-01-07", "退房 2027-01-10", "入住人 张**"))
         assert all(field not in reply for field in ("张旅客", "TEST-DOCUMENT", "TEST-PHONE"))
-        llm.propose.assert_not_awaited()
+        assert llm.propose.await_count == (1 if previous_order_query else 2)

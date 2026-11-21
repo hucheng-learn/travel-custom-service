@@ -38,6 +38,8 @@ def _hotel_line(item: dict) -> str:
 
 
 class OrderItineraryAction(OrderQueryAction):
+    # 对应技术设计 3.7 “这笔订单哪天入住”：先由父类核验订单，再展示实际明细行程。
+    # 酒店按 travelTime/travelEndTime 展示入住/退房日期，不能用下单时间推测。
     async def _render_order(
         self, travel: TravelClient, user_id: int, order_id: int, order_number: str, order: dict
     ) -> tuple[Reply, ...]:
