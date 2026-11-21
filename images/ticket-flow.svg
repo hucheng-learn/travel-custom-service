@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1263" viewBox="0 0 960 1263" role="img" aria-labelledby="title desc"><title id="title">3.6 投诉：从自然描述到真正创建工单</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1263" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.6 投诉：从自然描述到真正创建工单</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">示例：“我想投诉，不关联订单，房间很脏”。一条消息可给齐资料，确认前只有草稿。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 模型提取资料，代码核验</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-3">投诉 + 不关联订单 + 房间很脏</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">ticket_submit；ticket_type=complaint，附“投诉”来源。</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">no_order=true，附“不关联订单”来源；描述必须是原文。</text>
+<path d="M480.0 318 V332.0 H480.0 V346" class="arrow"/>
+<rect id="box-8" x="40.0" y="350" width="880.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="386" font-size="20" font-weight="700" fill="#172b43" data-owner="box-8">按业务依赖检查资料</text>
+<text x="60.0" y="424" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">有关联订单时读取本人订单核验归属，无订单则跳过。</text>
+<text x="60.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">缺类型/关联方式/描述就追问；描述不由模型代写，最多1000字。</text>
+<text x="40" y="540" font-size="20" font-weight="700" fill="#176c56">② 展示确认卡，尚未创建工单</text>
+<rect id="box-13" x="40.0" y="562" width="880.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="598" font-size="20" font-weight="700" fill="#785015" data-owner="box-13">5分钟有效的摘要</text>
+<text x="60.0" y="636" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">用户说“描述换成……”：模型给 update_slots，旧确认作废。</text>
+<text x="60.0" y="663" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">用户文字表示同意：只预览，须用当前有效确认卡提交。</text>
+<path d="M480.0 700 V714.0 H254.0 V728" class="arrow"/>
+<path d="M480.0 700 V714.0 H706.0 V728" class="arrow"/>
+<rect id="box-19" x="40.0" y="732" width="428.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="768" font-size="20" font-weight="700" fill="#785015" data-owner="box-19">点“不提交”或卡片失效</text>
+<text x="60.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-19">不提交：结束任务，新增工单0条。</text>
+<text x="60.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-19">过期：退回review并要求重新核对。</text>
+<rect id="box-23" x="492.0" y="732" width="428.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="768" font-size="20" font-weight="700" fill="#172b43" data-owner="box-23">点“确认提交”且门禁通过</text>
+<text x="512.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">核验任务、确认ID、期限。</text>
+<text x="512.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">关联订单时提交前再核验本人归属。</text>
+<text x="40" y="922" font-size="20" font-weight="700" fill="#176c56">③ 原子落库，再返回编号</text>
+<rect id="box-28" x="40.0" y="944" width="880.0" height="138" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="980" font-size="20" font-weight="700" fill="#165e46" data-owner="box-28">同一个事务创建操作、工单、事件和回执</text>
+<text x="60.0" y="1018" font-size="18" font-weight="400" fill="#34465c" data-owner="box-28">先按确认ID查重；新工单状态open，事件created。</text>
+<text x="60.0" y="1045" font-size="18" font-weight="400" fill="#34465c" data-owner="box-28">中途失败一起回滚；重复确认取回同一工单。</text>
+<path d="M480.0 1082 V1096.0 H480.0 V1110" class="arrow"/>
+<rect id="box-33" x="40.0" y="1114" width="880.0" height="111" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="1150" font-size="20" font-weight="700" fill="#165e46" data-owner="box-33">查看进度只读取本人同一张工单</text>
+<text x="60.0" y="1188" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">返回编号、状态和处理提示；不会重复建单。</text></svg>

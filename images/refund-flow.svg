@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1393" viewBox="0 0 960 1393" role="img" aria-labelledby="title desc"><title id="title">3.5 退款：自然表达怎样走到有效确认</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1393" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.5 退款：自然表达怎样走到有效确认</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">模型理解和提取资料；预检、确认、发送权、提交与核对仍由服务端控制。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 一句话可补多项，也可逐轮补充</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-3">“ORD… 部分退五十元，行程有变”</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">模型提取订单、partial及来源、amount=50及来源、原因原文。</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">校验来源与金额，查询本人订单，选择实际明细。</text>
+<path d="M480.0 318 V332.0 H480.0 V346" class="arrow"/>
+<rect id="box-8" x="40.0" y="350" width="880.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="386" font-size="20" font-weight="700" fill="#785015" data-owner="box-8">缺什么才追问；齐全后预检</text>
+<text x="60.0" y="424" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">查订单状态、进行中申请、已成功退款与剩余金额。</text>
+<text x="60.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">全额金额由预检计算；记录不完整或金额不符时不提交。</text>
+<path d="M480.0 488 V502.0 H480.0 V516" class="arrow"/>
+<rect id="box-13" x="40.0" y="520" width="880.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="556" font-size="20" font-weight="700" fill="#785015" data-owner="box-13">生成服务端确认卡，5分钟有效</text>
+<text x="60.0" y="594" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">展示订单、明细、金额、原因；此时尚未创建申请。</text>
+<text x="60.0" y="621" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">文字“就这样提交吧”只能重新预览，不能发退款POST。</text>
+<text x="40" y="710" font-size="20" font-weight="700" fill="#176c56">② 改口和确认按钮，分别处理</text>
+<rect id="box-18" x="40.0" y="732" width="428.0" height="165" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="768" font-size="20" font-weight="700" fill="#172b43" data-owner="box-18">“还是换这笔单 / 改成二十块”</text>
+<text x="60.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-18">模型给 update_slots；旧确认失效。</text>
+<text x="60.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-18">换订单清旧明细与金额；改金额重算并生成新</text>
+<text x="60.0" y="860" font-size="18" font-weight="400" fill="#34465c" data-owner="box-18">摘要。</text>
+<rect id="box-23" x="492.0" y="732" width="428.0" height="165" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="768" font-size="20" font-weight="700" fill="#172b43" data-owner="box-23">点击有效确认卡</text>
+<text x="512.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">当前步骤、确认ID、有效期与开关必须通过。</text>
+<text x="512.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">点击“不提交”结束任务，新增申请0笔。</text>
+<text x="40" y="949" font-size="20" font-weight="700" fill="#176c56">③ 同意按钮后：再预检，再争取发送权</text>
+<rect id="box-28" x="40.0" y="971" width="880.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="1007" font-size="20" font-weight="700" fill="#172b43" data-owner="box-28">查不明旧操作 → 再预检 → pending → sending</text>
+<text x="60.0" y="1045" font-size="18" font-weight="400" fill="#34465c" data-owner="box-28">旧操作结果不明先核对；金额变化先重新确认。</text>
+<text x="60.0" y="1072" font-size="18" font-weight="400" fill="#34465c" data-owner="box-28">只有成功条件更新为sending的执行者才调用中台创建申请。</text>
+<path d="M480.0 1109 V1123.0 H254.0 V1137" class="arrow"/>
+<path d="M480.0 1109 V1123.0 H706.0 V1137" class="arrow"/>
+<rect id="box-34" x="40.0" y="1141" width="428.0" height="165" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="1177" font-size="20" font-weight="700" fill="#165e46" data-owner="box-34">明确成功 / 拒绝</text>
+<text x="60.0" y="1215" font-size="18" font-weight="400" fill="#34465c" data-owner="box-34">保存 succeeded 回执或 rejected 原因。</text>
+<text x="60.0" y="1242" font-size="18" font-weight="400" fill="#34465c" data-owner="box-34">成功代表创建申请，到账仍以审核和流水为准。</text>
+<rect id="box-38" x="492.0" y="1141" width="428.0" height="165" rx="12" fill="#fff1ef" stroke="#e9bbb3"/>
+<text x="512.0" y="1177" font-size="20" font-weight="700" fill="#8a3a2c" data-owner="box-38">响应不明：unknown</text>
+<text x="512.0" y="1215" font-size="18" font-weight="400" fill="#34465c" data-owner="box-38">按订单、明细、金额、时间和提交前基线查询。</text>
+<text x="512.0" y="1242" font-size="18" font-weight="400" fill="#34465c" data-owner="box-38">唯一匹配才认领成功；不明则继续待核对，绝</text>
+<text x="512.0" y="1269" font-size="18" font-weight="400" fill="#34465c" data-owner="box-38">不重发。</text>
+<text x="44" y="1350" font-size="16" font-weight="400" fill="#53657b">重复确认回放原回执。客服侧操作记录防重，中台没有跨系统幂等键；模型不拥有退款提交接口。</text></svg>

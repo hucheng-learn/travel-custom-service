@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1213" viewBox="0 0 960 1213" role="img" aria-labelledby="title desc"><title id="title">3.7 支付、指定订单行程与某天安排怎样分开</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1213" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.7 支付、指定订单行程与某天安排怎样分开</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">模型根据问题和上下文选择流程，代码核验引用与日期，再读取真实业务数据。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 三种目标，三种查询</text>
+<rect id="box-3" x="40.0" y="180" width="277.3333333333333" height="165" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-3">“那笔钱付上了吗”</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">order_status_query</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">需要订单引用，可用已有当</text>
+<text x="60.0" y="308" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">前订单。</text>
+<rect id="box-8" x="341.3333333333333" y="180" width="277.3333333333333" height="165" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="361.3333333333333" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-8">“酒店到底哪天住”</text>
+<text x="361.3333333333333" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">itinerary_query</text>
+<text x="361.3333333333333" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">查指定订单的实际入住/退</text>
+<text x="361.3333333333333" y="308" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">房明细。</text>
+<rect id="box-13" x="642.6666666666666" y="180" width="277.3333333333333" height="165" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="662.6666666666666" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-13">“下个礼拜二有什么安排”</text>
+<text x="662.6666666666666" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">itinerary_date_query</text>
+<text x="662.6666666666666" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">原文+归一化日期分开保存，</text>
+<text x="662.6666666666666" y="308" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">不需要订单号。</text>
+<path d="M178.66666666666666 345 V359.0 H178.66666666666666 V373" class="arrow"/>
+<path d="M480.0 345 V359.0 H480.0 V373" class="arrow"/>
+<path d="M781.3333333333333 345 V359.0 H781.3333333333333 V373" class="arrow"/>
+<rect id="box-21" x="40.0" y="377" width="277.3333333333333" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="413" font-size="20" font-weight="700" fill="#172b43" data-owner="box-21">核验订单，再查支付记录</text>
+<text x="60.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">文本编号须来自原文完整</text>
+<text x="60.0" y="478" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">token；卡片按ID查询。</text>
+<text x="60.0" y="505" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">状态、实付、支付流水分别</text>
+<text x="60.0" y="532" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">展示。</text>
+<rect id="box-27" x="341.3333333333333" y="377" width="277.3333333333333" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="361.3333333333333" y="413" font-size="20" font-weight="700" fill="#172b43" data-owner="box-27">核验订单，再读明细日期</text>
+<text x="361.3333333333333" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">酒店用入住/退房，交通用</text>
+<text x="361.3333333333333" y="478" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">明细出发时间。</text>
+<text x="361.3333333333333" y="505" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">查询成功留下</text>
+<text x="361.3333333333333" y="532" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">current_order_id供追问。</text>
+<rect id="box-33" x="642.6666666666666" y="377" width="277.3333333333333" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="662.6666666666666" y="413" font-size="20" font-weight="700" fill="#172b43" data-owner="box-33">查本人订单并逐单读明细</text>
+<text x="662.6666666666666" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">按实际出行/住宿日期匹配，</text>
+<text x="662.6666666666666" y="478" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">不按下单日期。</text>
+<text x="662.6666666666666" y="505" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">部分读取时说明范围，不断</text>
+<text x="662.6666666666666" y="532" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">言没有安排。</text>
+<text x="40" y="621" font-size="20" font-weight="700" fill="#176c56">② 酒店1月7日入住，1月10日退房</text>
+<rect id="box-40" x="40.0" y="643" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="679" font-size="20" font-weight="700" fill="#172b43" data-owner="box-40">查询日期</text>
+<text x="60.0" y="717" font-size="18" font-weight="400" fill="#34465c" data-owner="box-40">2027-01-07</text>
+<text x="60.0" y="744" font-size="18" font-weight="400" fill="#34465c" data-owner="box-40">2027-01-08 / 09</text>
+<text x="60.0" y="771" font-size="18" font-weight="400" fill="#34465c" data-owner="box-40">2027-01-10</text>
+<text x="60.0" y="798" font-size="18" font-weight="400" fill="#34465c" data-owner="box-40">2027-01-11</text>
+<rect id="box-46" x="492.0" y="643" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="679" font-size="20" font-weight="700" fill="#172b43" data-owner="box-46">这条住宿明细的匹配结果</text>
+<text x="512.0" y="717" font-size="18" font-weight="400" fill="#34465c" data-owner="box-46">当天入住</text>
+<text x="512.0" y="744" font-size="18" font-weight="400" fill="#34465c" data-owner="box-46">当天在住</text>
+<text x="512.0" y="771" font-size="18" font-weight="400" fill="#34465c" data-owner="box-46">当天退房</text>
+<text x="512.0" y="798" font-size="18" font-weight="400" fill="#34465c" data-owner="box-46">不匹配这条住宿</text>
+<text x="44" y="879" font-size="16" font-weight="400" fill="#53657b">常规日期可由代码复算，模型给的ISO日期必须一致；其他明确表达保留原文和归一化值，非法日期拒绝，含糊日期先澄</text>
+<text x="44" y="904" font-size="16" font-weight="400" fill="#53657b">清。</text>
+<text x="40" y="961" font-size="20" font-weight="700" fill="#176c56">③ 订单没说清时，不猜用途或对象</text>
+<rect id="box-55" x="40.0" y="983" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="1019" font-size="20" font-weight="700" fill="#172b43" data-owner="box-55">只发卡片、无活动任务</text>
+<text x="60.0" y="1057" font-size="18" font-weight="400" fill="#34465c" data-owner="box-55">暂存pending_order_id，询问查支付还是行</text>
+<text x="60.0" y="1084" font-size="18" font-weight="400" fill="#34465c" data-owner="box-55">程。</text>
+<text x="60.0" y="1111" font-size="18" font-weight="400" fill="#34465c" data-owner="box-55">紧随的一轮由模型理解用途，之后清除暂存线</text>
+<text x="60.0" y="1138" font-size="18" font-weight="400" fill="#34465c" data-owner="box-55">索。</text>
+<rect id="box-61" x="492.0" y="983" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="1019" font-size="20" font-weight="700" fill="#172b43" data-owner="box-61">省略订单的后续追问</text>
+<text x="512.0" y="1057" font-size="18" font-weight="400" fill="#34465c" data-owner="box-61">有已查订单：模型可引用服务端已有线索，再</text>
+<text x="512.0" y="1084" font-size="18" font-weight="400" fill="#34465c" data-owner="box-61">查实际数据。</text>
+<text x="512.0" y="1111" font-size="18" font-weight="400" fill="#34465c" data-owner="box-61">没有可引用对象：先建立行程任务并追问订单。</text></svg>

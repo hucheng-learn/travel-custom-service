@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1204" viewBox="0 0 960 1204" role="img" aria-labelledby="title desc"><title id="title">3.3 插入查询后，原任务怎样保留和恢复</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1204" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.3 插入查询后，原任务怎样保留和恢复</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">任务A查订单，任务B查行程；模型理解切换意图，代码维护一个活动任务和暂停栈。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① “帮我查订单”：建立 A</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="111" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#165e46" data-owner="box-3">活动=A，等订单；暂停栈=[]</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">缺订单引用，保存 collect_order 等待位置。</text>
+<text x="40" y="343" font-size="20" font-weight="700" fill="#176c56">② “先看看入住安排”：模型提出插入行程 B</text>
+<rect id="box-7" x="40.0" y="365" width="880.0" height="138" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="401" font-size="20" font-weight="700" fill="#165e46" data-owner="box-7">保留 A 的位置，激活 B</text>
+<text x="60.0" y="439" font-size="18" font-weight="400" fill="#34465c" data-owner="box-7">活动=B查行程；暂停栈=[A查订单]。</text>
+<text x="60.0" y="466" font-size="18" font-weight="400" fill="#34465c" data-owner="box-7">若被切走的是售后任务，作废其旧确认卡，退回 review。</text>
+<text x="40" y="555" font-size="20" font-weight="700" fill="#176c56">③ 发卡给 B：完成行程后恢复 A</text>
+<rect id="box-12" x="40.0" y="577" width="880.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="613" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-12">用订单卡片73查行程</text>
+<text x="60.0" y="651" font-size="18" font-weight="400" fill="#34465c" data-owner="box-12">B结束；从暂停栈恢复A。</text>
+<text x="60.0" y="678" font-size="18" font-weight="400" fill="#34465c" data-owner="box-12">只提示A还需要订单，不把给B的卡片再执行一次。</text>
+<text x="40" y="767" font-size="20" font-weight="700" fill="#176c56">④ 再次补订单，才完成 A</text>
+<rect id="box-17" x="40.0" y="789" width="880.0" height="111" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="825" font-size="20" font-weight="700" fill="#165e46" data-owner="box-17">订单查询成功，活动=null，暂停栈=[]</text>
+<text x="60.0" y="863" font-size="18" font-weight="400" fill="#34465c" data-owner="box-17">每轮状态与回复分别落库，重启按已保存的任务ID和步骤恢复。</text>
+<text x="40" y="952" font-size="20" font-weight="700" fill="#176c56">其他表达也走同一个任务控制机制</text>
+<rect id="box-21" x="40.0" y="974" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="1010" font-size="20" font-weight="700" fill="#172b43" data-owner="box-21">“这件事先放一放”</text>
+<text x="60.0" y="1048" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">pause_task：标记主动暂停，须明确要求恢复。</text>
+<text x="60.0" y="1075" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">“接着弄刚才那件事”→ resume_task。</text>
+<rect id="box-25" x="492.0" y="974" width="428.0" height="192" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="1010" font-size="20" font-weight="700" fill="#172b43" data-owner="box-25">“算了先不办了”</text>
+<text x="512.0" y="1048" font-size="18" font-weight="400" fill="#34465c" data-owner="box-25">cancel_task：停止客服任务，不取消真实预</text>
+<text x="512.0" y="1075" font-size="18" font-weight="400" fill="#34465c" data-owner="box-25">订。</text>
+<text x="512.0" y="1102" font-size="18" font-weight="400" fill="#34465c" data-owner="box-25">知识/闲聊插话保留当前任务；同类行程切换不</text>
+<text x="512.0" y="1129" font-size="18" font-weight="400" fill="#34465c" data-owner="box-25">重复压栈。</text></svg>

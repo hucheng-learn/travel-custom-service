@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1302" viewBox="0 0 960 1302" role="img" aria-labelledby="title desc"><title id="title">3.2 用户换一种说法，系统怎样理解</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1302" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.2 用户换一种说法，系统怎样理解</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">示例：正在等退款订单，用户说“我要退的是 ORD0000000073，那笔酒店订单”。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 把本轮文字和必要上下文交给模型</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-3">本轮输入 + 当前在问什么</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">当前任务=退款；step_id=order；问题=请发本人订单号或卡片。</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">同时提供已填资料摘要、缺失项、暂停任务、业务今日与时区。</text>
+<path d="M480.0 318 V332.0 H480.0 V346" class="arrow"/>
+<rect id="box-8" x="40.0" y="350" width="880.0" height="165" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="386" font-size="20" font-weight="700" fill="#172b43" data-owner="box-8">模型输出一个结构化计划</text>
+<text x="60.0" y="424" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">route=task；command=set_slots</text>
+<text x="60.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">order_number=ORD0000000073</text>
+<text x="60.0" y="478" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">“都退了”则可提取 refund_type={value: full, source: 都退了}。</text>
+<text x="40" y="567" font-size="20" font-weight="700" fill="#176c56">② 校验计划，不再要求固定句式</text>
+<rect id="box-14" x="40.0" y="589" width="880.0" height="165" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="625" font-size="20" font-weight="700" fill="#172b43" data-owner="box-14">有原文依据、属于本会话范围</text>
+<text x="60.0" y="663" font-size="18" font-weight="400" fill="#34465c" data-owner="box-14">编号是原文完整 token；枚举值与来源分别核对。</text>
+<text x="60.0" y="690" font-size="18" font-weight="400" fill="#34465c" data-owner="box-14">修改/取消/暂停/恢复检查任务状态和原文意图片段。</text>
+<text x="60.0" y="717" font-size="18" font-weight="400" fill="#34465c" data-owner="box-14">金额复算一致；订单归属仍由实际查询验证。</text>
+<path d="M480.0 754 V768.0 H254.0 V782" class="arrow"/>
+<path d="M480.0 754 V768.0 H706.0 V782" class="arrow"/>
+<rect id="box-21" x="40.0" y="786" width="428.0" height="165" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="822" font-size="20" font-weight="700" fill="#165e46" data-owner="box-21">通过：推进当前退款任务</text>
+<text x="60.0" y="860" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">查询本人订单，选择明细。</text>
+<text x="60.0" y="887" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">保存资料并追问仍缺的字段；不是直接提交退</text>
+<text x="60.0" y="914" font-size="18" font-weight="400" fill="#34465c" data-owner="box-21">款。</text>
+<rect id="box-26" x="492.0" y="786" width="428.0" height="165" rx="12" fill="#fff1ef" stroke="#e9bbb3"/>
+<text x="512.0" y="822" font-size="20" font-weight="700" fill="#8a3a2c" data-owner="box-26">不通过或有歧义：具体追问</text>
+<text x="512.0" y="860" font-size="18" font-weight="400" fill="#34465c" data-owner="box-26">编造编号、错误金额、跨会话任务等不能执行。</text>
+<text x="512.0" y="887" font-size="18" font-weight="400" fill="#34465c" data-owner="box-26">模型明确澄清时，不被关键词规则覆盖。</text>
+<text x="40" y="1003" font-size="20" font-weight="700" fill="#176c56">③ 模型故障时，保留有限明确输入</text>
+<rect id="box-31" x="40.0" y="1025" width="880.0" height="165" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="1061" font-size="20" font-weight="700" fill="#785015" data-owner="box-31">无配置 / 超时 / 无效输出</text>
+<text x="60.0" y="1099" font-size="18" font-weight="400" fill="#34465c" data-owner="box-31">仅接受提示中的明确快捷语、当前等待的完整编号或简单值。</text>
+<text x="60.0" y="1126" font-size="18" font-weight="400" fill="#34465c" data-owner="box-31">自由表达不能可靠判断时，提示重试并保留任务。</text>
+<text x="60.0" y="1153" font-size="18" font-weight="400" fill="#34465c" data-owner="box-31">结构化订单卡和确认卡仍由服务端校验。</text>
+<text x="44" y="1234" font-size="16" font-weight="400" fill="#53657b">正则只用于格式、编号边界、数值与日期解析等。移除 fixed_order_plan.py 和 travel_plans.py 的意图规则；文</text>
+<text x="44" y="1259" font-size="16" font-weight="400" fill="#53657b">本理解不再被售后模块提前接管。</text></svg>

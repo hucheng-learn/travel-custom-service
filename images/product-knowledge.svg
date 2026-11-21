@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="893" viewBox="0 0 960 893" role="img" aria-labelledby="title desc"><title id="title">3.4 查商品与问规则：先理解，再取对应证据</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="893" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.4 查商品与问规则：先理解，再取对应证据</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">两侧普通文本都先经模型理解；商品事实从中台取，规则从本地资料取。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 模型区分问题目标</text>
+<rect id="box-3" x="40.0" y="180" width="428.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-3">“2026-11-20 鼓楼区有哪些景点”</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">task / product_query</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">品类=景点；地区=鼓楼区；日期来自原文。</text>
+<rect id="box-7" x="492.0" y="180" width="428.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="512.0" y="216" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-7">“酒店免费取消的条件是什么”</text>
+<text x="512.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-7">knowledge / general</text>
+<text x="512.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-7">不需要启动商品或售后写入任务。</text>
+<path d="M254.0 318 V332.0 H254.0 V346" class="arrow"/>
+<path d="M706.0 318 V332.0 H706.0 V346" class="arrow"/>
+<rect id="box-13" x="40.0" y="350" width="428.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="386" font-size="20" font-weight="700" fill="#785015" data-owner="box-13">地区目录发现多个同名候选</text>
+<text x="60.0" y="424" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">列出候选，保存日期，等待完整地名。</text>
+<text x="60.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">下一轮模型把地名回答识别为补当前地区。</text>
+<rect id="box-17" x="492.0" y="350" width="428.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="512.0" y="386" font-size="20" font-weight="700" fill="#785015" data-owner="box-17">KnowledgeProvider 先匹配 FAQ</text>
+<text x="512.0" y="424" font-size="18" font-weight="400" fill="#34465c" data-owner="box-17">命中使用配置答案；未命中按BM25检索指南。</text>
+<text x="512.0" y="451" font-size="18" font-weight="400" fill="#34465c" data-owner="box-17">分数不足说明依据不够，候选接近则先澄清。</text>
+<path d="M254.0 488 V502.0 H254.0 V516" class="arrow"/>
+<path d="M706.0 488 V502.0 H706.0 V516" class="arrow"/>
+<rect id="box-23" x="40.0" y="520" width="428.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="556" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-23">“福建省 / 福州市 / 鼓楼区”</text>
+<text x="60.0" y="594" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">原文地区经校验后合并，沿用原日期。</text>
+<text x="60.0" y="621" font-size="18" font-weight="400" fill="#34465c" data-owner="box-23">按福州市查景点，再按地址筛选鼓楼区。</text>
+<rect id="box-27" x="492.0" y="520" width="428.0" height="138" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="512.0" y="556" font-size="20" font-weight="700" fill="#165e46" data-owner="box-27">有证据才回答，并附来源版本</text>
+<text x="512.0" y="594" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">通用规则需核对具体商品或订单退改条件。</text>
+<text x="512.0" y="621" font-size="18" font-weight="400" fill="#34465c" data-owner="box-27">本地检索本身不调用生成模型编写政策。</text>
+<path d="M254.0 658 V672.0 H254.0 V686" class="arrow"/>
+<path d="M706.0 658 V672.0 H706.0 V686" class="arrow"/>
+<rect id="box-33" x="40.0" y="690" width="428.0" height="165" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="726" font-size="20" font-weight="700" fill="#165e46" data-owner="box-33">返回真实可订结果或候选</text>
+<text x="60.0" y="764" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">示例可返回“三坊七巷”，以实际数据为准。</text>
+<text x="60.0" y="791" font-size="18" font-weight="400" fill="#34465c" data-owner="box-33">详情/价格须先锁定唯一商品。</text>
+<rect id="box-37" x="492.0" y="690" width="428.0" height="165" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="726" font-size="20" font-weight="700" fill="#172b43" data-owner="box-37">问到账时限与查实际进度分开</text>
+<text x="512.0" y="764" font-size="18" font-weight="400" fill="#34465c" data-owner="box-37">通用到账时限：模型标记 refund_arrival，</text>
+<text x="512.0" y="791" font-size="18" font-weight="400" fill="#34465c" data-owner="box-37">资料未承诺则说明未知。</text>
+<text x="512.0" y="818" font-size="18" font-weight="400" fill="#34465c" data-owner="box-37">具体申请：refund_status，读取真实记录。</text></svg>

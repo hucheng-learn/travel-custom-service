@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1009" viewBox="0 0 960 1009" role="img" aria-labelledby="title desc"><title id="title">3.3 理解完成后，订单 YAML 怎样跨轮执行</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1009" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.3 理解完成后，订单 YAML 怎样跨轮执行</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">模型给出计划，Validator 给出已校验槽位；FlowExecutor 只执行只读查询步骤。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 第一轮缺订单：停在 collect_order</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#785015" data-owner="box-3">start → collect_order</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">没有 order_ref，回复“请发订单号……”</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">保存任务 ID、step_id 和 missing_slots，等待下一条消息。</text>
+<text x="40" y="370" font-size="20" font-weight="700" fill="#176c56">② 下一轮补齐：继续同一个任务</text>
+<rect id="box-8" x="40.0" y="392" width="880.0" height="138" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="428" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-8">文本由模型提取；卡片直接校验</text>
+<text x="60.0" y="466" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">输入最终统一为 OrderReference。</text>
+<text x="60.0" y="493" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">collect_order 消费本轮补充一次，随后进入 lookup。</text>
+<path d="M480.0 530 V544.0 H480.0 V558" class="arrow"/>
+<rect id="box-13" x="40.0" y="562" width="880.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="598" font-size="20" font-weight="700" fill="#172b43" data-owner="box-13">lookup 调用 query_order_status</text>
+<text x="60.0" y="636" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">查询订单详情与支付记录；返回受控 outcome。</text>
+<text x="60.0" y="663" font-size="18" font-weight="400" fill="#34465c" data-owner="box-13">按 YAML routes 选择分支，不按回复文字猜成功失败。</text>
+<path d="M480.0 700 V714.0 H254.0 V728" class="arrow"/>
+<path d="M480.0 700 V714.0 H706.0 V728" class="arrow"/>
+<rect id="box-19" x="40.0" y="732" width="428.0" height="165" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="768" font-size="20" font-weight="700" fill="#165e46" data-owner="box-19">ok → show_result → end</text>
+<text x="60.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-19">展示真实结果，返回 task=None。</text>
+<text x="60.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-19">引擎结束任务、记录订单线索，并恢复最近可</text>
+<text x="60.0" y="860" font-size="18" font-weight="400" fill="#34465c" data-owner="box-19">继续的暂停任务。</text>
+<rect id="box-24" x="492.0" y="732" width="428.0" height="165" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="512.0" y="768" font-size="20" font-weight="700" fill="#785015" data-owner="box-24">查不到 / 范围受限 / 暂不可用</text>
+<text x="512.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-24">解释后回 collect_order，清除旧订单引用。</text>
+<text x="512.0" y="833" font-size="18" font-weight="400" fill="#34465c" data-owner="box-24">pause=true：这轮停下，下一轮再补，不自动</text>
+<text x="512.0" y="860" font-size="18" font-weight="400" fill="#34465c" data-owner="box-24">循环重查。</text>
+<text x="44" y="941" font-size="16" font-weight="400" fill="#53657b">单轮最多24步；旧版本任务由引擎/校验器拒绝恢复。步骤只有 start、collect、action、response、end；退款和工</text>
+<text x="44" y="966" font-size="16" font-weight="400" fill="#53657b">单的确认/写入仍在 AfterSales。</text></svg>

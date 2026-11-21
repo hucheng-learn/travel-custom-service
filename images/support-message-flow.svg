@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1167" viewBox="0 0 960 1167" role="img" aria-labelledby="title desc"><title id="title">3.1 同一笔订单，两轮消息怎样接起来</title><desc id="desc">蓝色为输入，绿色为保存状态或确定结果，黄色为等待或提交前检查，红色为拒绝或异常。所有示例业务数据以实际查询为准。</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8a9bae"/></marker></defs><style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif}.arrow{fill:none;stroke:#8a9bae;stroke-width:1.7;marker-end:url(#arrow)}</style><rect width="960" height="1167" fill="#f6f8fb"/><text x="40" y="46" font-size="27" font-weight="700" fill="#34465c">3.1 同一笔订单，两轮消息怎样接起来</text>
+<text x="40" y="80" font-size="17" font-weight="400" fill="#53657b">文本统一由模型理解，卡片直接校验；每轮都先判重、恢复快照，最后保存状态与回复。</text>
+<text x="40" y="158" font-size="20" font-weight="700" fill="#176c56">① 接入：这条消息能否开始处理？</text>
+<rect id="box-3" x="40.0" y="180" width="880.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="216" font-size="20" font-weight="700" fill="#172b43" data-owner="box-3">按会话归属、messageId 和输入摘要判重</text>
+<text x="60.0" y="254" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">已完成且同内容：回放回复；内容冲突或仍在处理：409。</text>
+<text x="60.0" y="281" font-size="18" font-weight="400" fill="#34465c" data-owner="box-3">新轮次保存处理令牌和期限，恢复活动任务、暂停栈及订单线索。</text>
+<text x="40" y="370" font-size="20" font-weight="700" fill="#176c56">② 两轮输入，分别推进同一任务</text>
+<rect id="box-8" x="40.0" y="392" width="428.0" height="111" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="60.0" y="428" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-8">第一轮：“帮我查订单”</text>
+<text x="60.0" y="466" font-size="18" font-weight="400" fill="#34465c" data-owner="box-8">当前没有活动任务。</text>
+<rect id="box-11" x="492.0" y="392" width="428.0" height="111" rx="12" fill="#edf4ff" stroke="#b7cdeb"/>
+<text x="512.0" y="428" font-size="20" font-weight="700" fill="#1d4d85" data-owner="box-11">第二轮：发送订单卡片 73</text>
+<text x="512.0" y="466" font-size="18" font-weight="400" fill="#34465c" data-owner="box-11">当前任务正在等订单。</text>
+<path d="M254.0 503 V517.0 H254.0 V531" class="arrow"/>
+<path d="M706.0 503 V517.0 H706.0 V531" class="arrow"/>
+<rect id="box-16" x="40.0" y="535" width="428.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="60.0" y="571" font-size="20" font-weight="700" fill="#172b43" data-owner="box-16">模型提出订单查询计划</text>
+<text x="60.0" y="609" font-size="18" font-weight="400" fill="#34465c" data-owner="box-16">start_flow / order_status_query</text>
+<text x="60.0" y="636" font-size="18" font-weight="400" fill="#34465c" data-owner="box-16">校验后建立任务，执行 collect_order。</text>
+<rect id="box-20" x="492.0" y="535" width="428.0" height="138" rx="12" fill="#fff" stroke="#d4dce6"/>
+<text x="512.0" y="571" font-size="20" font-weight="700" fill="#172b43" data-owner="box-20">卡片直接变成订单引用</text>
+<text x="512.0" y="609" font-size="18" font-weight="400" fill="#34465c" data-owner="box-20">不调用模型；校验当前步骤接受 order_ref。</text>
+<text x="512.0" y="636" font-size="18" font-weight="400" fill="#34465c" data-owner="box-20">使用本人身份查询订单 73 和支付记录。</text>
+<path d="M254.0 673 V687.0 H254.0 V701" class="arrow"/>
+<path d="M706.0 673 V687.0 H706.0 V701" class="arrow"/>
+<rect id="box-26" x="40.0" y="705" width="428.0" height="138" rx="12" fill="#fff8e9" stroke="#e4c68b"/>
+<text x="60.0" y="741" font-size="20" font-weight="700" fill="#785015" data-owner="box-26">没有订单：追问并保留任务</text>
+<text x="60.0" y="779" font-size="18" font-weight="400" fill="#34465c" data-owner="box-26">active_task=订单查询</text>
+<text x="60.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-26">step_id=collect_order，等下一轮补充。</text>
+<rect id="box-30" x="492.0" y="705" width="428.0" height="138" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="512.0" y="741" font-size="20" font-weight="700" fill="#165e46" data-owner="box-30">查成功：结束查询，保留线索</text>
+<text x="512.0" y="779" font-size="18" font-weight="400" fill="#34465c" data-owner="box-30">本例无暂停任务：active_task=null</text>
+<text x="512.0" y="806" font-size="18" font-weight="400" fill="#34465c" data-owner="box-30">current_order_id=73，承接入住等后续追问。</text>
+<text x="40" y="895" font-size="20" font-weight="700" fill="#176c56">③ 收尾：先保存，再返回</text>
+<rect id="box-35" x="40.0" y="917" width="880.0" height="138" rx="12" fill="#edf8f3" stroke="#a7d4c0"/>
+<text x="60.0" y="953" font-size="20" font-weight="700" fill="#165e46" data-owner="box-35">状态快照与完整回复，同事务提交</text>
+<text x="60.0" y="991" font-size="18" font-weight="400" fill="#34465c" data-owner="box-35">核验处理令牌和版本，保存 completed 轮次并释放标记。</text>
+<text x="60.0" y="1018" font-size="18" font-weight="400" fill="#34465c" data-owner="box-35">普通接口返回结果；SSE 在落库后切分文本，最终发送 done。</text>
+<text x="44" y="1099" font-size="16" font-weight="400" fill="#53657b">如果第二轮改为“我要查的是 ORD…，那笔酒店订单”，同样先由模型提取 order_number，再校验归属；用户不必使用固</text>
+<text x="44" y="1124" font-size="16" font-weight="400" fill="#53657b">定前缀。</text></svg>
